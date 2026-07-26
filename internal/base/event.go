@@ -53,7 +53,6 @@ type Event struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
-// IsTerminal reports whether an event ends the response lifecycle.
 func IsTerminal(event Event) bool {
 	return terminalEvents[event.Type]
 }

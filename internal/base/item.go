@@ -65,17 +65,14 @@ type ContentPart struct {
 	Text string `json:"text"`
 }
 
-// GetText concatenates every text part of a message item.
 func GetText(item Item) string {
 	return joinParts(item.Content)
 }
 
-// GetSummary concatenates every part of a reasoning item's summary.
 func GetSummary(item Item) string {
 	return joinParts(item.Summary)
 }
 
-// FilterItems keeps the items a predicate accepts, in order.
 func FilterItems(items []Item, keep func(Item) bool) []Item {
 	kept := make([]Item, 0, len(items))
 	for _, item := range items {
@@ -222,7 +219,6 @@ type reasoningShape struct {
 	EncryptedContent string        `json:"encrypted_content,omitempty"`
 }
 
-// joinParts concatenates the text of a part list.
 func joinParts(parts []ContentPart) string {
 	var joined strings.Builder
 	for _, part := range parts {

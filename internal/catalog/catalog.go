@@ -23,12 +23,10 @@ import (
 // mid-thought.
 const AnthropicMaxTokensFallback = 20000
 
-// New builds the catalog.
 func New() core.Catalog {
 	return core.Catalog{Dialects: Dialects(), Presets: Presets()}
 }
 
-// Dialects is the dispatch table of wire formats.
 func Dialects() map[string]dialect.Dialect {
 	table := map[string]dialect.Dialect{}
 	for _, spoken := range []dialect.Dialect{
@@ -108,10 +106,8 @@ func Presets() map[string]base.Backend {
 	}
 }
 
-// DialectNames lists the wire formats, for help text and flag validation.
 func DialectNames() []string { return sorted(Dialects()) }
 
-// PresetNames lists the presets, for help text and flag validation.
 func PresetNames() []string { return sorted(Presets()) }
 
 func sorted[V any](table map[string]V) []string {

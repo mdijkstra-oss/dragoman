@@ -6,7 +6,6 @@ package anthropicmessages
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/matthijn/dragoman/internal/base"
 	"github.com/matthijn/dragoman/internal/dialect"
@@ -19,7 +18,6 @@ const Name = "anthropic-messages"
 // request is rejected before it is read.
 const Version = "2023-06-01"
 
-// Dialect returns the wire format.
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
 		Name:   Name,
@@ -36,25 +34,13 @@ func Dialect() dialect.Dialect {
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
-		DropTable: map[string]base.DropReason{
-			"temperature":       base.DropUnsupported,
-			"top_p":             base.DropUnsupported,
-			"top_k":             base.DropUnsupported,
-			"seed":              base.DropUnsupported,
-			"frequency_penalty": base.DropUnsupported,
-			"presence_penalty":  base.DropUnsupported,
-			"logit_bias":        base.DropUnsupported,
-			"logprobs":          base.DropUnsupported,
-			"top_logprobs":      base.DropUnsupported,
-			"n":                 base.DropUnsupported,
-			"strict":            base.DropUnsupported,
-			"name":              base.DropUnsupported,
-		},
+		DropTable: dialect.DropTable(map[string]base.DropReason{
+			"strict": base.DropUnsupported,
+			"name":   base.DropUnsupported,
+		}),
 	}
 }
 
-// carries lists the base fields this dialect places somewhere. Everything the
-// caller supplies that is not here is reported rather than quietly discarded.
 var carries = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
@@ -62,9 +48,6 @@ var carries = dialect.Carries{
 }
 
 func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
-	// Unknown top-level fields are rejected rather than ignored here, so the
-	// body is built from modelled fields only and everything the base did not
-	// consume is reported rather than forwarded.
 	drops, err := base.Unmodelled(req.Raw, req)
 	if err != nil {
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
@@ -146,7 +129,7 @@ func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error)
 		Message: func(item base.Item) {
 			text := base.GetText(item)
 			if item.Role == base.RoleSystem || item.Role == base.RoleDeveloper {
-				system = joinSystem(system, text)
+				system = dialect.JoinText(system, text)
 				return
 			}
 			role := base.RoleUser
@@ -198,7 +181,7 @@ func toolChoice(req base.Request) *wireToolChoice {
 	if known := dialect.KnownChoice(req); known != nil {
 		if known.Name != "" {
 			choice = &wireToolChoice{Type: "tool", Name: known.Name}
-		} else if mapped, isMode := choiceModes[known.Mode]; isMode {
+		} else if mapped, isMode := dialect.ChoiceModes[known.Mode]; isMode {
 			choice = &wireToolChoice{Type: mapped}
 		}
 	}
@@ -210,12 +193,6 @@ func toolChoice(req base.Request) *wireToolChoice {
 		choice.DisableParallelToolUse = &disable
 	}
 	return choice
-}
-
-var choiceModes = map[string]string{
-	base.ToolChoiceAuto:     "auto",
-	base.ToolChoiceNone:     "none",
-	base.ToolChoiceRequired: "any",
 }
 
 // decodeState holds what is bounded by one message: the input token count seen
@@ -244,7 +221,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 			return current, dialect.Recognised{}, nil
 		}
 		return current, dialect.Recognised{
-			Pieces: []base.Piece{base.FailurePiece(event.Error.Type, event.Error.Message)},
+			Pieces: []base.Piece{dialect.Failure(event.Error)},
 		}, nil
 
 	case "message_start":
@@ -268,7 +245,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		if kind == "" {
 			return current, dialect.Recognised{Drops: unmappedBlock(block.Type, event.Index)}, nil
 		}
-		pieces := []base.Piece{base.OpenPiece(key(event.Index), kind)}
+		pieces := []base.Piece{base.OpenPiece(dialect.Key(event.Index), kind)}
 		pieces = append(pieces, openPieces(event.Index, block)...)
 		return current, dialect.Recognised{Pieces: pieces, Drops: blockDrops(event.RawBlock, block, event.Index)}, nil
 
@@ -279,7 +256,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		return current, dialect.Recognised{Pieces: deltaPieces(event.Index, *event.Delta)}, nil
 
 	case "content_block_stop":
-		return current, dialect.Recognised{Pieces: []base.Piece{base.ClosePiece(key(event.Index))}}, nil
+		return current, dialect.Recognised{Pieces: []base.Piece{base.ClosePiece(dialect.Key(event.Index))}}, nil
 
 	case "message_delta":
 		pieces := []base.Piece{}
@@ -291,7 +268,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 			}))
 		}
 		if event.Delta != nil {
-			pieces = append(pieces, outcomePiece(event.Delta.StopReason))
+			pieces = append(pieces, dialect.Outcome(event.Delta.StopReason, stopReasons))
 		}
 		return current, dialect.Recognised{Pieces: pieces}, nil
 	}
@@ -306,7 +283,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	if message.Error != nil {
 		return dialect.Recognised{Pieces: []base.Piece{
 			base.Start(message.ID, message.Model, 0),
-			base.FailurePiece(message.Error.Type, message.Error.Message),
+			dialect.Failure(message.Error),
 		}}, nil
 	}
 	pieces := []base.Piece{base.Start(message.ID, message.Model, 0)}
@@ -317,10 +294,10 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 			skipped = append(skipped, unmappedBlock(block.Type, index)...)
 			continue
 		}
-		pieces = append(pieces, base.OpenPiece(key(index), kind))
+		pieces = append(pieces, base.OpenPiece(dialect.Key(index), kind))
 		pieces = append(pieces, openPieces(index, block)...)
 		pieces = append(pieces, contentPieces(index, block)...)
-		pieces = append(pieces, base.ClosePiece(key(index)))
+		pieces = append(pieces, base.ClosePiece(dialect.Key(index)))
 	}
 	if message.Usage != nil {
 		pieces = append(pieces, base.UsagePiece(&base.Usage{
@@ -329,7 +306,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 			TotalTokens:  message.Usage.InputTokens + message.Usage.OutputTokens,
 		}))
 	}
-	pieces = append(pieces, outcomePiece(message.StopReason))
+	pieces = append(pieces, dialect.Outcome(message.StopReason, stopReasons))
 
 	drops := skipped
 	for index, raw := range message.RawContent {
@@ -344,10 +321,10 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 func openPieces(index int, block wireBlock) []base.Piece {
 	pieces := []base.Piece{}
 	if block.Type == "tool_use" {
-		pieces = append(pieces, base.CallPiece(key(index), block.ID, block.Name))
+		pieces = append(pieces, base.CallPiece(dialect.Key(index), block.ID, block.Name))
 	}
 	if block.Type == "thinking" && block.Signature != "" {
-		pieces = append(pieces, base.StatePiece(key(index), block.Signature))
+		pieces = append(pieces, base.StatePiece(dialect.Key(index), block.Signature))
 	}
 	return pieces
 }
@@ -360,17 +337,17 @@ func contentPieces(index int, block wireBlock) []base.Piece {
 		if block.Text == "" {
 			return nil
 		}
-		return []base.Piece{base.TextPiece(key(index), block.Text)}
+		return []base.Piece{base.TextPiece(dialect.Key(index), block.Text)}
 	case "thinking":
 		if block.Thinking == "" {
 			return nil
 		}
-		return []base.Piece{base.SummaryPiece(key(index), block.Thinking)}
+		return []base.Piece{base.SummaryPiece(dialect.Key(index), block.Thinking)}
 	case "tool_use":
 		if len(block.Input) == 0 {
 			return nil
 		}
-		return []base.Piece{base.ArgsPiece(key(index), string(block.Input))}
+		return []base.Piece{base.ArgsPiece(dialect.Key(index), string(block.Input))}
 	}
 	return nil
 }
@@ -378,13 +355,13 @@ func contentPieces(index int, block wireBlock) []base.Piece {
 func deltaPieces(index int, delta wireDelta) []base.Piece {
 	switch delta.Type {
 	case "text_delta":
-		return []base.Piece{base.TextPiece(key(index), delta.Text)}
+		return []base.Piece{base.TextPiece(dialect.Key(index), delta.Text)}
 	case "thinking_delta":
-		return []base.Piece{base.SummaryPiece(key(index), delta.Thinking)}
+		return []base.Piece{base.SummaryPiece(dialect.Key(index), delta.Thinking)}
 	case "signature_delta":
-		return []base.Piece{base.StatePiece(key(index), delta.Signature)}
+		return []base.Piece{base.StatePiece(dialect.Key(index), delta.Signature)}
 	case "input_json_delta":
-		return []base.Piece{base.ArgsPiece(key(index), delta.PartialJSON)}
+		return []base.Piece{base.ArgsPiece(dialect.Key(index), delta.PartialJSON)}
 	}
 	return nil
 }
@@ -392,16 +369,10 @@ func deltaPieces(index int, delta wireDelta) []base.Piece {
 // outcomePiece maps a provider stop reason onto one of the three base
 // statuses. An unknown value is not dragoman's business: it passes through as
 // a completed response rather than crashing a decoder.
-func outcomePiece(stopReason string) base.Piece {
-	switch stopReason {
-	case "max_tokens":
-		return base.OutcomePiece(base.StatusIncomplete, &base.IncompleteDetails{Reason: "max_output_tokens"}, nil)
-	case "refusal":
-		return base.OutcomePiece(base.StatusIncomplete, &base.IncompleteDetails{Reason: "refusal"}, nil)
-	case "model_context_window_exceeded":
-		return base.OutcomePiece(base.StatusIncomplete, &base.IncompleteDetails{Reason: stopReason}, nil)
-	}
-	return base.OutcomePiece(base.StatusCompleted, nil, nil)
+var stopReasons = map[string]string{
+	"max_tokens":                    "max_output_tokens",
+	"refusal":                       "refusal",
+	"model_context_window_exceeded": "model_context_window_exceeded",
 }
 
 // kindOf maps a block type onto a base item. Anthropic emits block types
@@ -412,13 +383,8 @@ func kindOf(blockType string) base.ItemType {
 	return blockKinds[blockType]
 }
 
-// unmappedBlock reports a block type the base does not carry.
 func unmappedBlock(blockType string, index int) []base.Drop {
-	return []base.Drop{{
-		Path:   fmt.Sprintf("content[%d]", index),
-		Reason: base.DropUnimplemented,
-		Detail: "block type " + blockType + " is not carried by the base",
-	}}
+	return []base.Drop{dialect.Unmapped(dialect.IndexedPath("content", index), "block type", blockType)}
 }
 
 var blockKinds = map[string]base.ItemType{
@@ -428,31 +394,7 @@ var blockKinds = map[string]base.ItemType{
 }
 
 func blockDrops(raw json.RawMessage, block wireBlock, index int) []base.Drop {
-	if len(raw) == 0 {
-		return nil
-	}
-	drops, err := base.Diff(raw, block)
-	if err != nil {
-		return nil
-	}
-	out := make([]base.Drop, 0, len(drops))
-	for _, drop := range drops {
-		drop.Path = fmt.Sprintf("content[%d].%s", index, drop.Path)
-		out = append(out, drop)
-	}
-	return out
-}
-
-func key(index int) string { return strconv.Itoa(index) }
-
-func joinSystem(existing, addition string) string {
-	if existing == "" {
-		return addition
-	}
-	if addition == "" {
-		return existing
-	}
-	return existing + "\n\n" + addition
+	return dialect.ShapeDrops(raw, block, dialect.IndexedPath("content", index))
 }
 
 type wireRequest struct {
@@ -566,13 +508,13 @@ type wireFormat struct {
 }
 
 type wireMessageResponse struct {
-	ID         string            `json:"id"`
-	Model      string            `json:"model"`
-	Content    []wireBlock       `json:"content"`
-	RawContent []json.RawMessage `json:"-"`
-	StopReason string            `json:"stop_reason"`
-	Usage      *wireUsage        `json:"usage"`
-	Error      *wireError        `json:"error"`
+	ID         string             `json:"id"`
+	Model      string             `json:"model"`
+	Content    []wireBlock        `json:"content"`
+	RawContent []json.RawMessage  `json:"-"`
+	StopReason string             `json:"stop_reason"`
+	Usage      *wireUsage         `json:"usage"`
+	Error      *dialect.WireError `json:"error"`
 }
 
 func (m *wireMessageResponse) UnmarshalJSON(data []byte) error {
@@ -581,14 +523,8 @@ func (m *wireMessageResponse) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var envelope struct {
-		Content []json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return err
-	}
 	*m = wireMessageResponse(decoded)
-	m.RawContent = envelope.Content
+	m.RawContent = dialect.RawElements(data, "content")
 	return nil
 }
 
@@ -597,20 +533,15 @@ type wireUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-type wireError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-
 type wireEvent struct {
-	Type         string          `json:"type"`
-	Error        *wireError      `json:"error"`
-	Index        int             `json:"index"`
-	Message      *wireStartMsg   `json:"message"`
-	ContentBlock *wireBlock      `json:"content_block"`
-	RawBlock     json.RawMessage `json:"-"`
-	Delta        *wireDelta      `json:"delta"`
-	Usage        *wireUsage      `json:"usage"`
+	Type         string             `json:"type"`
+	Error        *dialect.WireError `json:"error"`
+	Index        int                `json:"index"`
+	Message      *wireStartMsg      `json:"message"`
+	ContentBlock *wireBlock         `json:"content_block"`
+	RawBlock     json.RawMessage    `json:"-"`
+	Delta        *wireDelta         `json:"delta"`
+	Usage        *wireUsage         `json:"usage"`
 }
 
 func (e *wireEvent) UnmarshalJSON(data []byte) error {
@@ -619,14 +550,8 @@ func (e *wireEvent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var envelope struct {
-		ContentBlock json.RawMessage `json:"content_block"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return err
-	}
 	*e = wireEvent(decoded)
-	e.RawBlock = envelope.ContentBlock
+	e.RawBlock = dialect.RawField(data, "content_block")
 	return nil
 }
 

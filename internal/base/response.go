@@ -3,7 +3,6 @@ package base
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // Response is an openai-responses response body. This is what the caller
@@ -56,7 +55,6 @@ const (
 	ObjectResponse = "response"
 )
 
-// ParseResponse decodes a Responses body into the base, keeping the raw bytes.
 func ParseResponse(body []byte) (Response, error) {
 	var resp Response
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -66,23 +64,6 @@ func ParseResponse(body []byte) (Response, error) {
 	return resp, nil
 }
 
-// FindCalls returns the function_call items of a response.
 func FindCalls(resp Response) []Item {
 	return FilterItems(resp.Output, func(item Item) bool { return item.Type == ItemFunctionCall })
-}
-
-// FindReasoning returns the reasoning items of a response.
-func FindReasoning(resp Response) []Item {
-	return FilterItems(resp.Output, func(item Item) bool { return item.Type == ItemReasoning })
-}
-
-// GetOutputText concatenates the assistant text of a response.
-func GetOutputText(resp Response) string {
-	var text strings.Builder
-	for _, item := range resp.Output {
-		if item.Type == ItemMessage {
-			text.WriteString(GetText(item))
-		}
-	}
-	return text.String()
 }

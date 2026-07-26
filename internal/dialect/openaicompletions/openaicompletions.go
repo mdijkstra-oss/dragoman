@@ -29,7 +29,6 @@ const (
 	callPrefix   = "call:"
 )
 
-// Dialect returns the wire format.
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
 		Name:   Name,
@@ -45,22 +44,10 @@ func Dialect() dialect.Dialect {
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
-		DropTable: map[string]base.DropReason{
-			"temperature":       base.DropUnsupported,
-			"top_p":             base.DropUnsupported,
-			"top_k":             base.DropUnsupported,
-			"seed":              base.DropUnsupported,
-			"frequency_penalty": base.DropUnsupported,
-			"presence_penalty":  base.DropUnsupported,
-			"logit_bias":        base.DropUnsupported,
-			"logprobs":          base.DropUnsupported,
-			"top_logprobs":      base.DropUnsupported,
-			"n":                 base.DropUnsupported,
-		},
+		DropTable:    dialect.DropTable(nil),
 	}
 }
 
-// carries lists the base fields this dialect places somewhere.
 var carries = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
@@ -180,7 +167,7 @@ func buildMessages(req base.Request) ([]wireMessage, []base.Drop, error) {
 				return
 			}
 			turn := assistant()
-			turn.ReasoningContent = joinText(turn.ReasoningContent, item.EncryptedContent)
+			turn.ReasoningContent = dialect.JoinText(turn.ReasoningContent, item.EncryptedContent)
 		},
 		Call: func(item base.Item) error {
 			turn := assistant()
@@ -205,17 +192,7 @@ func buildMessages(req base.Request) ([]wireMessage, []base.Drop, error) {
 // join appends to a turn's existing text rather than replacing it, so a run of
 // assistant items keeps every one of them.
 func join(existing *content, addition string) string {
-	return joinText(contentText(existing), addition)
-}
-
-func joinText(existing, addition string) string {
-	if existing == "" {
-		return addition
-	}
-	if addition == "" {
-		return existing
-	}
-	return existing + "\n\n" + addition
+	return dialect.JoinText(contentText(existing), addition)
 }
 
 func buildTools(tools []base.Tool) []wireTool {
@@ -277,7 +254,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 
 	if chunk.Error != nil {
 		return current, dialect.Recognised{
-			Pieces: []base.Piece{base.FailurePiece(chunk.Error.Type, chunk.Error.Message)},
+			Pieces: []base.Piece{dialect.Failure(chunk.Error)},
 		}, nil
 	}
 
@@ -300,7 +277,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		built = append(built, deltaPieces(*choice.Delta)...)
 	}
 	if choice.FinishReason != nil && *choice.FinishReason != "" {
-		built = append(built, outcomePiece(*choice.FinishReason))
+		built = append(built, dialect.Outcome(*choice.FinishReason, finishReasons))
 	}
 	return current, dialect.Recognised{Pieces: built}, nil
 }
@@ -313,7 +290,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	if completion.Error != nil {
 		return dialect.Recognised{Pieces: []base.Piece{
 			base.Start(completion.ID, completion.Model, completion.Created),
-			base.FailurePiece(completion.Error.Type, completion.Error.Message),
+			dialect.Failure(completion.Error),
 		}}, nil
 	}
 	built := []base.Piece{base.Start(completion.ID, completion.Model, completion.Created)}
@@ -323,10 +300,10 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 		choice := completion.Choices[0]
 		if choice.Message != nil {
 			built = append(built, messagePieces(*choice.Message)...)
-			drops = append(drops, messageDrops(choice.RawMessage, *choice.Message)...)
+			drops = append(drops, dialect.ShapeDrops(choice.RawMessage, *choice.Message, "choices[0].message")...)
 		}
 		if choice.FinishReason != nil {
-			built = append(built, outcomePiece(*choice.FinishReason))
+			built = append(built, dialect.Outcome(*choice.FinishReason, finishReasons))
 		}
 	}
 	if completion.Usage != nil {
@@ -407,14 +384,9 @@ func deltaPieces(delta wireDelta) []base.Piece {
 // outcomePiece maps a finish reason onto a base status. A value the dialect
 // does not define passes through as a completed response rather than crashing
 // a decoder — that set belongs to the provider.
-func outcomePiece(finishReason string) base.Piece {
-	switch finishReason {
-	case "length":
-		return base.OutcomePiece(base.StatusIncomplete, &base.IncompleteDetails{Reason: "max_output_tokens"}, nil)
-	case "content_filter":
-		return base.OutcomePiece(base.StatusIncomplete, &base.IncompleteDetails{Reason: "content_filter"}, nil)
-	}
-	return base.OutcomePiece(base.StatusCompleted, nil, nil)
+var finishReasons = map[string]string{
+	"length":         "max_output_tokens",
+	"content_filter": "content_filter",
 }
 
 func usagePiece(usage *wireUsage) base.Piece {
@@ -423,22 +395,6 @@ func usagePiece(usage *wireUsage) base.Piece {
 		OutputTokens: usage.CompletionTokens,
 		TotalTokens:  usage.TotalTokens,
 	})
-}
-
-func messageDrops(raw json.RawMessage, message wireMessage) []base.Drop {
-	if len(raw) == 0 {
-		return nil
-	}
-	drops, err := base.Diff(raw, message)
-	if err != nil {
-		return nil
-	}
-	out := make([]base.Drop, 0, len(drops))
-	for _, drop := range drops {
-		drop.Path = "choices[0].message." + drop.Path
-		out = append(out, drop)
-	}
-	return out
 }
 
 func callKey(index int) string { return callPrefix + strconv.Itoa(index) }
@@ -525,19 +481,13 @@ type wireFunction struct {
 	Strict      *bool           `json:"strict,omitempty"`
 }
 
-type wireError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-	Code    string `json:"code"`
-}
-
 type wireCompletion struct {
-	Error   *wireError   `json:"error"`
-	ID      string       `json:"id"`
-	Model   string       `json:"model"`
-	Created int64        `json:"created"`
-	Choices []wireChoice `json:"choices"`
-	Usage   *wireUsage   `json:"usage"`
+	Error   *dialect.WireError `json:"error"`
+	ID      string             `json:"id"`
+	Model   string             `json:"model"`
+	Created int64              `json:"created"`
+	Choices []wireChoice       `json:"choices"`
+	Usage   *wireUsage         `json:"usage"`
 }
 
 type wireChoice struct {
@@ -552,24 +502,18 @@ func (c *wireChoice) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var envelope struct {
-		Message json.RawMessage `json:"message"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return err
-	}
 	*c = wireChoice(decoded)
-	c.RawMessage = envelope.Message
+	c.RawMessage = dialect.RawField(data, "message")
 	return nil
 }
 
 type wireChunk struct {
-	Error   *wireError        `json:"error"`
-	ID      string            `json:"id"`
-	Model   string            `json:"model"`
-	Created int64             `json:"created"`
-	Choices []wireChunkChoice `json:"choices"`
-	Usage   *wireUsage        `json:"usage"`
+	Error   *dialect.WireError `json:"error"`
+	ID      string             `json:"id"`
+	Model   string             `json:"model"`
+	Created int64              `json:"created"`
+	Choices []wireChunkChoice  `json:"choices"`
+	Usage   *wireUsage         `json:"usage"`
 }
 
 type wireChunkChoice struct {

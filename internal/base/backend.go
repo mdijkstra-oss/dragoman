@@ -24,11 +24,6 @@ type Quirks struct {
 	// invented value, so absent stays absent everywhere it still can.
 	MaxTokensFallback *int
 
-	// EffortField relocates the reasoning level when the dialect alone does
-	// not settle its home. The value still passes through untouched; which
-	// field it lands in belongs here.
-	EffortField string
-
 	// MaxTokensField relocates the output cap. Two endpoints serving the same
 	// wire shape can disagree about its name, and the one that is not read is
 	// silently ignored rather than rejected.
@@ -42,10 +37,6 @@ type Quirks struct {
 	// does not write prompts, a schema against such a backend is dropped and
 	// reported, and the caller gets prose.
 	NoStructuredSchema bool
-
-	// EchoReasoningContent marks a backend that returns 400 unless the
-	// reasoning it handed out is echoed back once a tool call has occurred.
-	EchoReasoningContent bool
 
 	// StreamUpstream marks a backend that must be streamed from even when the
 	// caller asked for one buffered body, because folding that stream is

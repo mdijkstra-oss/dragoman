@@ -50,7 +50,6 @@ type Dialect struct {
 // and never mutated; each dialect defines its own concrete type.
 type State any
 
-// Encoded is a request body together with what could not be carried into it.
 type Encoded struct {
 	Body  json.RawMessage
 	Drops []base.Drop
@@ -108,7 +107,6 @@ func DecodeBody(d Dialect, body []byte) ([]base.Event, []base.Drop, error) {
 	return append(events, finished...), recognised.Drops, nil
 }
 
-// Endpoint joins a backend's base URL to the dialect's operation path.
 func Endpoint(d Dialect, backend base.Backend) string {
 	return trimSlash(backend.Endpoint) + d.Path
 }

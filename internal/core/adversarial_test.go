@@ -9,10 +9,7 @@ import (
 	"github.com/matthijn/dragoman/internal/dialect"
 )
 
-// decodeStream runs frames through a dialect's transducer and flushes, which is
-// what the transport does. Frames a real backend would never send are exactly
-// the interesting cases: the machine has to stay well-formed under them.
-func decodeStream(t *testing.T, dialectName string, frames []base.Frame) []base.Event {
+func decodeStream(t *testing.T, dialectName string, frames []base.Frame) ([]base.Event, []base.Drop) {
 	t.Helper()
 	spoken, known := catalog.Dialects()[dialectName]
 	if !known {
@@ -32,25 +29,7 @@ func decodeStream(t *testing.T, dialectName string, frames []base.Frame) []base.
 	if err != nil {
 		t.Fatalf("flush: %v", err)
 	}
-	return append(events, flushed...)
-}
-
-// decodeDrops is decodeStream's other half, for the cases that assert what a
-// decoder reported rather than what it emitted.
-func decodeDrops(t *testing.T, dialectName string, frames []base.Frame) []base.Drop {
-	t.Helper()
-	spoken := catalog.Dialects()[dialectName]
-	collected := []base.Drop{}
-	decoder := dialect.Decoder(spoken, func(drops []base.Drop) { collected = append(collected, drops...) })
-	for _, frame := range frames {
-		if _, err := decoder.Step(frame); err != nil {
-			t.Fatalf("step: %v", err)
-		}
-	}
-	if _, err := decoder.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
-	}
-	return collected
+	return append(events, flushed...), collected
 }
 
 func dataFrames(payloads ...string) []base.Frame {
@@ -59,31 +38,6 @@ func dataFrames(payloads ...string) []base.Frame {
 		frames = append(frames, base.Frame{Data: []byte(payload)})
 	}
 	return frames
-}
-
-// assertWellFormed states the two properties every emitted sequence must have,
-// whatever arrived: sequence numbers are dense and 1-based, and there is
-// exactly one terminal event.
-func assertWellFormed(t *testing.T, events []base.Event) {
-	t.Helper()
-	if len(events) == 0 {
-		t.Fatal("no events emitted")
-	}
-	if events[0].Type != base.EventCreated {
-		t.Errorf("first event = %q, want %q", events[0].Type, base.EventCreated)
-	}
-	terminals := 0
-	for index, event := range events {
-		if event.SequenceNumber != index+1 {
-			t.Fatalf("sequence_number at %d = %d, want %d", index, event.SequenceNumber, index+1)
-		}
-		if base.IsTerminal(event) {
-			terminals++
-		}
-	}
-	if terminals != 1 {
-		t.Errorf("terminal events = %d, want exactly 1", terminals)
-	}
 }
 
 // TestImplicitBoundariesAreInferred covers the one decoder that has to infer
@@ -140,8 +94,8 @@ func TestImplicitBoundariesAreInferred(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			events := decodeStream(t, "openai-completions", testCase.frames)
-			assertWellFormed(t, events)
+			events, _ := decodeStream(t, "openai-completions", testCase.frames)
+			assertEventGrammar(t, events)
 			folded, err := base.Fold(events)
 			if err != nil {
 				t.Fatalf("fold: %v", err)
@@ -162,9 +116,9 @@ func TestStructuralFillerIsNotAnItem(t *testing.T) {
 	}
 	for name, opening := range cases {
 		t.Run(name, func(t *testing.T) {
-			events := decodeStream(t, "openai-completions", dataFrames(opening,
+			events, _ := decodeStream(t, "openai-completions", dataFrames(opening,
 				`{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
-			assertWellFormed(t, events)
+			assertEventGrammar(t, events)
 			folded, err := base.Fold(events)
 			if err != nil {
 				t.Fatalf("fold: %v", err)
@@ -211,8 +165,8 @@ func TestUnmappedItemTypesAreSkippedNotGuessed(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			events := decodeStream(t, testCase.dialect, testCase.frames)
-			assertWellFormed(t, events)
+			events, drops := decodeStream(t, testCase.dialect, testCase.frames)
+			assertEventGrammar(t, events)
 			folded, err := base.Fold(events)
 			if err != nil {
 				t.Fatalf("fold: %v", err)
@@ -220,7 +174,6 @@ func TestUnmappedItemTypesAreSkippedNotGuessed(t *testing.T) {
 			if len(folded.Output) != 0 {
 				t.Errorf("output = %+v, want none: an unmapped type must not be guessed into an item", folded.Output)
 			}
-			drops := decodeDrops(t, testCase.dialect, testCase.frames)
 			if !mentions(drops, testCase.wantIn) {
 				t.Errorf("drops = %+v, want one naming %q", drops, testCase.wantIn)
 			}
@@ -240,8 +193,8 @@ func TestStepsLeftOpenAreFlushed(t *testing.T) {
 		{Event: "step.delta", Data: []byte(`{"index":1,"delta":{"type":"arguments_delta","arguments":"{\"a\":1}"},"event_type":"step.delta"}`)},
 		{Event: "interaction.completed", Data: []byte(`{"interaction":{"id":"i1","status":"completed","model":"g"},"event_type":"interaction.completed"}`)},
 	}
-	events := decodeStream(t, "gemini-interactions", frames)
-	assertWellFormed(t, events)
+	events, _ := decodeStream(t, "gemini-interactions", frames)
+	assertEventGrammar(t, events)
 	folded, err := base.Fold(events)
 	if err != nil {
 		t.Fatalf("fold: %v", err)
@@ -257,8 +210,8 @@ func TestStepsLeftOpenAreFlushed(t *testing.T) {
 func TestEmptyStreamStillOpensTheLifecycle(t *testing.T) {
 	for _, name := range catalog.DialectNames() {
 		t.Run(name, func(t *testing.T) {
-			events := decodeStream(t, name, nil)
-			assertWellFormed(t, events)
+			events, _ := decodeStream(t, name, nil)
+			assertEventGrammar(t, events)
 			if len(events) != 3 {
 				t.Errorf("events = %d, want created, in_progress and a terminal", len(events))
 			}
@@ -307,11 +260,11 @@ func mentions(drops []base.Drop, needle string) bool {
 // it names the response. An item announced before response.created is a grammar
 // a stock client cannot read.
 func TestLifecycleOpensBeforeAnyItem(t *testing.T) {
-	events := decodeStream(t, "openai-completions", dataFrames(
+	events, _ := decodeStream(t, "openai-completions", dataFrames(
 		`{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`,
 		`{"id":"c1","model":"m","created":1,"choices":[{"index":0,"delta":{"content":" there"},"finish_reason":"stop"}]}`,
 	))
-	assertWellFormed(t, events)
+	assertEventGrammar(t, events)
 	folded, err := base.Fold(events)
 	if err != nil {
 		t.Fatalf("fold: %v", err)
@@ -360,7 +313,8 @@ func TestFoldEqualsBufferedForOneAnswer(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			streamed, err := base.Fold(decodeStream(t, "openai-completions", testCase.frames))
+			streamEvents, _ := decodeStream(t, "openai-completions", testCase.frames)
+			streamed, err := base.Fold(streamEvents)
 			if err != nil {
 				t.Fatalf("fold stream: %v", err)
 			}

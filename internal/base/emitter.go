@@ -39,12 +39,11 @@ type OpenItem struct {
 	ItemID      string
 	OutputIndex int
 
-	PartOpen    bool
-	SummaryOpen bool
+	// Parts holds the two content channels an item can carry, indexed by
+	// channel. They differ only in which events name them.
+	Parts [channels]partState
 
-	Text      string
 	Arguments string
-	Summary   string
 
 	Name   string
 	CallID string
@@ -55,6 +54,33 @@ type OpenItem struct {
 	State string
 }
 
+// partState is one content channel of an open item.
+type partState struct {
+	Open bool
+	Text string
+}
+
+// channelID names a content channel. The answer and the reasoning summary run
+// through identical machinery under different event names.
+type channelID int
+
+const (
+	answer channelID = iota
+	summary
+	channels
+)
+
+var channelEvents = [channels]struct {
+	Part  string
+	Added EventType
+	Done  EventType
+	Delta EventType
+	Text  EventType
+}{
+	answer:  {PartOutputText, EventPartAdded, EventPartDone, EventTextDelta, EventTextDone},
+	summary: {PartSummary, EventSummaryPartAdded, EventSummaryPartDone, EventSummaryTextDelta, EventSummaryTextDone},
+}
+
 // PlacedItem is a closed item together with the output index it occupies, so
 // that items which interleave still fold back in wire order.
 type PlacedItem struct {
@@ -62,7 +88,6 @@ type PlacedItem struct {
 	Item  Item
 }
 
-// Begin emits the two events that open the lifecycle.
 func Begin(e Emitter) (Emitter, []Event) {
 	if e.Started {
 		return e, nil
@@ -73,7 +98,6 @@ func Begin(e Emitter) (Emitter, []Event) {
 	return e, append(created, progress...)
 }
 
-// Open starts an item under a dialect-chosen key, minting its id.
 func Open(e Emitter, key string, kind ItemType) (Emitter, []Event) {
 	return OpenAs(e, key, kind, "")
 }
@@ -113,27 +137,39 @@ func OpenAs(e Emitter, key string, kind ItemType, itemID string) (Emitter, []Eve
 // TextDelta appends assistant text to a message item, opening it if the
 // dialect never announced a start.
 func TextDelta(e Emitter, key, text string) (Emitter, []Event) {
-	e, opened := ensureOpen(e, key, ItemMessage)
+	return channelDelta(e, key, ItemMessage, answer, text)
+}
+
+// SummaryDelta appends to a reasoning item's human-readable summary.
+func SummaryDelta(e Emitter, key, text string) (Emitter, []Event) {
+	return channelDelta(e, key, ItemReasoning, summary, text)
+}
+
+// channelDelta appends to one content channel, opening its part on first use so
+// that an item which never produces content never announces one.
+func channelDelta(e Emitter, key string, kind ItemType, which channelID, text string) (Emitter, []Event) {
+	e, opened := ensureOpen(e, key, kind)
 	index, _ := findOpen(e, key)
 	item := e.Open[index]
+	names := channelEvents[which]
 
 	var partEvents []Event
-	if !item.PartOpen {
-		item.PartOpen = true
+	if !item.Parts[which].Open {
+		item.Parts[which].Open = true
 		e.Open = replaceOpen(e.Open, index, item)
 		e, partEvents = emit(e, Event{
-			Type:         EventPartAdded,
+			Type:         names.Added,
 			ItemID:       item.ItemID,
 			OutputIndex:  intPtr(item.OutputIndex),
 			ContentIndex: intPtr(0),
-			Part:         &ContentPart{Type: PartOutputText},
+			Part:         &ContentPart{Type: names.Part},
 		})
 	}
 
-	item.Text += text
+	item.Parts[which].Text += text
 	e.Open = replaceOpen(e.Open, index, item)
 	e, delta := emit(e, Event{
-		Type:         EventTextDelta,
+		Type:         names.Delta,
 		ItemID:       item.ItemID,
 		OutputIndex:  intPtr(item.OutputIndex),
 		ContentIndex: intPtr(0),
@@ -156,37 +192,6 @@ func ArgumentsDelta(e Emitter, key, fragment string) (Emitter, []Event) {
 		Delta:       fragment,
 	})
 	return e, append(opened, delta...)
-}
-
-// SummaryDelta appends to a reasoning item's human-readable summary.
-func SummaryDelta(e Emitter, key, text string) (Emitter, []Event) {
-	e, opened := ensureOpen(e, key, ItemReasoning)
-	index, _ := findOpen(e, key)
-	item := e.Open[index]
-
-	var partEvents []Event
-	if !item.SummaryOpen {
-		item.SummaryOpen = true
-		e.Open = replaceOpen(e.Open, index, item)
-		e, partEvents = emit(e, Event{
-			Type:         EventSummaryPartAdded,
-			ItemID:       item.ItemID,
-			OutputIndex:  intPtr(item.OutputIndex),
-			ContentIndex: intPtr(0),
-			Part:         &ContentPart{Type: PartSummary},
-		})
-	}
-
-	item.Summary += text
-	e.Open = replaceOpen(e.Open, index, item)
-	e, delta := emit(e, Event{
-		Type:         EventSummaryTextDelta,
-		ItemID:       item.ItemID,
-		OutputIndex:  intPtr(item.OutputIndex),
-		ContentIndex: intPtr(0),
-		Delta:        text,
-	})
-	return e, concat(opened, partEvents, delta)
 }
 
 // SetCall records the identity of a function call. The call id is the identity
@@ -230,41 +235,27 @@ func Close(e Emitter, key string) (Emitter, []Event) {
 	e.Open = removeOpen(e.Open, index)
 
 	events := []Event{}
-	if item.PartOpen {
+	for which := answer; which < channels; which++ {
+		if !item.Parts[which].Open {
+			continue
+		}
+		names := channelEvents[which]
 		var textDone, partDone []Event
 		e, textDone = emit(e, Event{
-			Type:         EventTextDone,
+			Type:         names.Text,
 			ItemID:       item.ItemID,
 			OutputIndex:  intPtr(item.OutputIndex),
 			ContentIndex: intPtr(0),
-			Text:         item.Text,
+			Text:         item.Parts[which].Text,
 		})
 		e, partDone = emit(e, Event{
-			Type:         EventPartDone,
+			Type:         names.Done,
 			ItemID:       item.ItemID,
 			OutputIndex:  intPtr(item.OutputIndex),
 			ContentIndex: intPtr(0),
-			Part:         &ContentPart{Type: PartOutputText, Text: item.Text},
+			Part:         &ContentPart{Type: names.Part, Text: item.Parts[which].Text},
 		})
 		events = concat(events, textDone, partDone)
-	}
-	if item.SummaryOpen {
-		var summaryText, summaryPart []Event
-		e, summaryText = emit(e, Event{
-			Type:         EventSummaryTextDone,
-			ItemID:       item.ItemID,
-			OutputIndex:  intPtr(item.OutputIndex),
-			ContentIndex: intPtr(0),
-			Text:         item.Summary,
-		})
-		e, summaryPart = emit(e, Event{
-			Type:         EventSummaryPartDone,
-			ItemID:       item.ItemID,
-			OutputIndex:  intPtr(item.OutputIndex),
-			ContentIndex: intPtr(0),
-			Part:         &ContentPart{Type: PartSummary, Text: item.Summary},
-		})
-		events = concat(events, summaryText, summaryPart)
 	}
 	if item.Kind == ItemFunctionCall {
 		var argsDone []Event
@@ -289,7 +280,6 @@ func Close(e Emitter, key string) (Emitter, []Event) {
 	return e, append(events, itemDone...)
 }
 
-// SetUsage records whatever the backend reported.
 func SetUsage(e Emitter, usage *Usage) Emitter {
 	e.Usage = usage
 	return e
@@ -328,7 +318,6 @@ func Finish(e Emitter) (Emitter, []Event) {
 	return e, append(events, terminal...)
 }
 
-// Snapshot renders the response the emitter has accumulated so far.
 func Snapshot(e Emitter, status string) Response {
 	placed := append([]PlacedItem(nil), e.Done...)
 	sort.SliceStable(placed, func(a, b int) bool { return placed[a].Index < placed[b].Index })
@@ -405,7 +394,7 @@ func closedItem(item OpenItem) Item {
 	switch item.Kind {
 	case ItemMessage:
 		closed.Role = RoleAssistant
-		closed.Content = []ContentPart{{Type: PartOutputText, Text: item.Text}}
+		closed.Content = []ContentPart{{Type: PartOutputText, Text: item.Parts[answer].Text}}
 	case ItemFunctionCall:
 		closed.CallID = item.CallID
 		closed.Name = item.Name
@@ -417,8 +406,8 @@ func closedItem(item OpenItem) Item {
 	case ItemReasoning:
 		closed.Status = ""
 		closed.EncryptedContent = item.State
-		if item.Summary != "" {
-			closed.Summary = []ContentPart{{Type: PartSummary, Text: item.Summary}}
+		if text := item.Parts[summary].Text; text != "" {
+			closed.Summary = []ContentPart{{Type: PartSummary, Text: text}}
 		}
 	default:
 		panic("base: cannot close item of kind " + string(item.Kind))

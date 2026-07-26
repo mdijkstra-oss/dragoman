@@ -15,7 +15,6 @@ import (
 // Name is the dialect's value on the command line.
 const Name = "openai-responses"
 
-// Dialect returns the wire format.
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
 		Name:   Name,
@@ -122,7 +121,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		}
 		return current, dialect.Recognised{
 			Pieces: closePieces(item, streamedContent(current, item.ID)),
-			Drops:  itemDrops(event.Item, item, itemPath(event.OutputIndex)),
+			Drops:  dialect.ShapeDrops(event.Item, item, itemPath(event.OutputIndex)),
 		}, nil
 
 	case base.EventCompleted, base.EventIncomplete, base.EventFailed:
@@ -143,7 +142,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	skipped := []base.Drop{}
 	for index, item := range resp.Output {
 		if !base.IsKnownItemType(item.Type) {
-			skipped = append(skipped, unmappedItem(item, fmt.Sprintf("output[%d]", index))...)
+			skipped = append(skipped, unmappedItem(item, dialect.IndexedPath("output", index))...)
 			continue
 		}
 		built = append(built, base.OpenIdentified(item.ID, item.Type, item.ID))
@@ -164,55 +163,25 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	if err != nil {
 		return dialect.Recognised{}, fmt.Errorf("%s: %w", Name, err)
 	}
-	return dialect.Recognised{Pieces: built, Drops: append(skipped, prefixed(drops, "output")...)}, nil
+	return dialect.Recognised{Pieces: built, Drops: append(skipped, dialect.Prefixed(drops, "output")...)}, nil
 }
 
 // unmappedItem reports an item type dragoman does not move. The base carries
 // four; anything else belongs to a capability that is out of scope, and the
 // caller is told rather than left with a silently shorter answer.
 func unmappedItem(item base.Item, path string) []base.Drop {
-	return []base.Drop{{
-		Path:   path,
-		Reason: base.DropUnimplemented,
-		Detail: "item type " + string(item.Type) + " is not carried by the base",
-	}}
+	return []base.Drop{dialect.Unmapped(path, "item type", string(item.Type))}
 }
 
 func pieces(list ...base.Piece) dialect.Recognised {
 	return dialect.Recognised{Pieces: list}
 }
 
-func itemDrops(raw json.RawMessage, item base.Item, path string) []base.Drop {
-	if len(raw) == 0 {
-		return nil
-	}
-	drops, err := base.Diff(raw, item)
-	if err != nil {
-		return nil
-	}
-	return prefixed(drops, path)
-}
-
 func itemPath(outputIndex *int) string {
 	if outputIndex == nil {
 		return "output"
 	}
-	return fmt.Sprintf("output[%d]", *outputIndex)
-}
-
-func prefixed(drops []base.Drop, prefix string) []base.Drop {
-	out := make([]base.Drop, 0, len(drops))
-	for _, drop := range drops {
-		if drop.Path == "" {
-			drop.Path = prefix
-		} else if drop.Path[0] == '[' {
-			drop.Path = prefix + drop.Path
-		} else {
-			drop.Path = prefix + "." + drop.Path
-		}
-		out = append(out, drop)
-	}
-	return out
+	return dialect.IndexedPath("output", *outputIndex)
 }
 
 // closePieces renders a complete item. Content already delivered as deltas is

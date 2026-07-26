@@ -95,8 +95,6 @@ const (
 	ToolChoiceFunction = "function"
 )
 
-// ParseRequest decodes a Responses body into the base, keeping the raw bytes
-// beside the typed fields.
 func ParseRequest(body []byte) (Request, error) {
 	var req Request
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -106,7 +104,6 @@ func ParseRequest(body []byte) (Request, error) {
 	return req, nil
 }
 
-// GetModel returns the model the request carries, or the empty string.
 func GetModel(req Request) string {
 	if req.Model == nil {
 		return ""
@@ -123,10 +120,8 @@ func GetEffort(req Request) string {
 	return *req.Reasoning.Effort
 }
 
-// GetStream reports whether the caller asked for the event sequence.
 func GetStream(req Request) bool { return req.Stream != nil && *req.Stream }
 
-// GetFormat returns the structured-output format, if any.
 func GetFormat(req Request) *Format {
 	if req.Text == nil {
 		return nil

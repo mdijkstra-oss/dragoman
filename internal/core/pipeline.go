@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 
@@ -24,17 +23,12 @@ type Catalog struct {
 // decides when they reach a file descriptor.
 type Sink func(base.Event) error
 
-// Result is what one run produced.
 type Result struct {
 	Response *base.Response
 	Drops    []base.Drop
 	Sent     json.RawMessage
 	Received json.RawMessage
 }
-
-// As is errors.As, re-exported so callers of this package do not have to
-// reach for the standard library to read an exit code.
-func As(err error, target any) bool { return errors.As(err, target) }
 
 // SelectBackend resolves a backend from a preset and the flags that override
 // it. A backend is a dialect at a URL with a key in the environment.

@@ -30,11 +30,11 @@ type CLI struct {
 	Effort    string `help:"Reasoning level. Passed through untouched."`
 	MaxTokens int    `help:"Output cap." name:"max-tokens" default:"0"`
 
-	Stream    bool `help:"Deliver the event sequence." negatable:""`
-	Strict    bool `help:"Treat any dropped field as an error."`
-	NoExecute bool `help:"Translate and print the request; make no call." name:"no-execute"`
-	Raw       bool `help:"Return the backend's untranslated response."`
-	Verbose   bool `help:"Write the translation and its dropped fields to stderr." short:"v"`
+	Stream    *bool `help:"Deliver the event sequence." negatable:""`
+	Strict    bool  `help:"Treat any dropped field as an error."`
+	NoExecute bool  `help:"Translate and print the request; make no call." name:"no-execute"`
+	Raw       bool  `help:"Return the backend's untranslated response."`
+	Verbose   bool  `help:"Write the translation and its dropped fields to stderr." short:"v"`
 
 	File   string `help:"Read the request from a file instead of stdin." short:"f" type:"path"`
 	Output string `help:"Write the result to a file instead of stdout." short:"o" type:"path"`
@@ -144,24 +144,8 @@ func options(cli CLI) (core.Options, error) {
 		cap := cli.MaxTokens
 		opts.MaxTokens = &cap
 	}
-	if streamed, set := streamFlag(); set {
-		opts.Stream = &streamed
-	}
+	opts.Stream = cli.Stream
 	return opts, nil
-}
-
-// streamFlag reports whether the caller forced the output mode from the shell.
-// Absent, what arrived in the body is honoured.
-func streamFlag() (bool, bool) {
-	for _, arg := range os.Args[1:] {
-		switch arg {
-		case "--stream":
-			return true, true
-		case "--no-stream":
-			return false, true
-		}
-	}
-	return false, false
 }
 
 // usageExit is how kong's exit is caught so dragoman owns the code.

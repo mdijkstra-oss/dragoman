@@ -71,8 +71,6 @@ func Classify(drops []Drop, table map[string]DropReason) []Drop {
 	return classified
 }
 
-// LeafName returns the final field name of a drop path, with any array
-// subscripts removed.
 func LeafName(path string) string {
 	if index := strings.LastIndex(path, "."); index >= 0 {
 		path = path[index+1:]
@@ -83,7 +81,6 @@ func LeafName(path string) string {
 	return path
 }
 
-// FormatDrops renders drops one per line for stderr.
 func FormatDrops(drops []Drop) string {
 	lines := make([]string, 0, len(drops))
 	for _, drop := range drops {
@@ -96,7 +93,6 @@ func FormatDrops(drops []Drop) string {
 	return strings.Join(lines, "\n")
 }
 
-// MergeDrops concatenates drop lists, keeping the first entry for each path.
 func MergeDrops(groups ...[]Drop) []Drop {
 	seen := map[string]bool{}
 	merged := []Drop{}

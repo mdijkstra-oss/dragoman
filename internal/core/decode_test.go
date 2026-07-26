@@ -328,10 +328,17 @@ func assertEventGrammar(t *testing.T, events []base.Event) {
 	if !base.IsTerminal(events[len(events)-1]) {
 		t.Errorf("last event = %q, want a terminal event", events[len(events)-1].Type)
 	}
+	terminals := 0
 	for index, event := range events {
 		if event.SequenceNumber != index+1 {
 			t.Fatalf("sequence_number at %d = %d, want %d", index, event.SequenceNumber, index+1)
 		}
+		if base.IsTerminal(event) {
+			terminals++
+		}
+	}
+	if terminals != 1 {
+		t.Errorf("terminal events = %d, want exactly 1", terminals)
 	}
 	open := map[string]bool{}
 	for _, event := range events {

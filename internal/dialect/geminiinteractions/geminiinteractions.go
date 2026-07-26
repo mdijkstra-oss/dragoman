@@ -6,7 +6,6 @@ package geminiinteractions
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +29,6 @@ const (
 	stepFunctionResult = "function_result"
 )
 
-// Dialect returns the wire format.
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
 		Name:   Name,
@@ -47,31 +45,18 @@ func Dialect() dialect.Dialect {
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
-		DropTable: map[string]base.DropReason{
-			"temperature":       base.DropUnsupported,
-			"top_p":             base.DropUnsupported,
-			"top_k":             base.DropUnsupported,
-			"seed":              base.DropUnsupported,
-			"frequency_penalty": base.DropUnsupported,
-			"presence_penalty":  base.DropUnsupported,
-			"logit_bias":        base.DropUnsupported,
-			"logprobs":          base.DropUnsupported,
-			"top_logprobs":      base.DropUnsupported,
-			"n":                 base.DropUnsupported,
-			"strict":            base.DropUnsupported,
-		},
+		DropTable: dialect.DropTable(map[string]base.DropReason{
+			"strict": base.DropUnsupported,
+		}),
 	}
 }
 
-// carries lists the base fields this dialect places somewhere.
 var carries = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
 }
 
 func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
-	// Any unknown key at any depth is rejected here, so the body carries only
-	// modelled fields and everything else is reported.
 	drops, err := base.Unmodelled(req.Raw, req)
 	if err != nil {
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
@@ -153,7 +138,7 @@ func buildSteps(req base.Request) ([]wireStep, string, []base.Drop, error) {
 		Message: func(item base.Item) {
 			text := base.GetText(item)
 			if item.Role == base.RoleSystem || item.Role == base.RoleDeveloper {
-				system = joinSystem(system, text)
+				system = dialect.JoinText(system, text)
 				return
 			}
 			stepType := stepUserInput
@@ -242,7 +227,7 @@ func toolChoice(req base.Request) (any, []base.Drop) {
 	// for it — including when the caller spelled auto out.
 	mode := ""
 	if known != nil {
-		mode = choiceModes[known.Mode]
+		mode = dialect.ChoiceModes[known.Mode]
 	}
 	if allStrict(req.Tools) && (mode == "" || mode == "auto") {
 		return "validated", drops
@@ -251,12 +236,6 @@ func toolChoice(req base.Request) (any, []base.Drop) {
 		return nil, drops
 	}
 	return mode, drops
-}
-
-var choiceModes = map[string]string{
-	base.ToolChoiceAuto:     "auto",
-	base.ToolChoiceNone:     "none",
-	base.ToolChoiceRequired: "any",
 }
 
 // allStrict reports whether every tool asked for constrained decoding, which
@@ -293,7 +272,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 	}
 	if event.Error != nil {
 		return current, dialect.Recognised{
-			Pieces: []base.Piece{base.FailurePiece(event.Error.Code, event.Error.Message)},
+			Pieces: []base.Piece{dialect.Failure(event.Error)},
 		}, nil
 	}
 	name := event.EventType
@@ -324,7 +303,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		return current, dialect.Recognised{Pieces: deltaPieces(event.Index, *event.Delta)}, nil
 
 	case "step.stop":
-		return current, dialect.Recognised{Pieces: []base.Piece{base.ClosePiece(key(event.Index))}}, nil
+		return current, dialect.Recognised{Pieces: []base.Piece{base.ClosePiece(dialect.Key(event.Index))}}, nil
 
 	case "interaction.completed":
 		if event.Interaction == nil {
@@ -343,14 +322,14 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	if interaction.Error != nil {
 		return dialect.Recognised{Pieces: []base.Piece{
 			base.Start(interaction.ID, interaction.Model, 0),
-			base.FailurePiece(interaction.Error.Code, interaction.Error.Message),
+			dialect.Failure(interaction.Error),
 		}}, nil
 	}
 	pieces := []base.Piece{base.Start(interaction.ID, interaction.Model, createdAt(interaction.Created))}
 	for index, step := range interaction.Steps {
 		pieces = append(pieces, openPieces(index, step)...)
 		pieces = append(pieces, contentPieces(index, step)...)
-		pieces = append(pieces, base.ClosePiece(key(index)))
+		pieces = append(pieces, base.ClosePiece(dialect.Key(index)))
 	}
 	pieces = append(pieces, outcomePieces(interaction)...)
 
@@ -359,14 +338,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 		if index >= len(interaction.Steps) {
 			continue
 		}
-		stepDrops, err := base.Diff(raw, interaction.Steps[index])
-		if err != nil {
-			continue
-		}
-		for _, drop := range stepDrops {
-			drop.Path = fmt.Sprintf("steps[%d].%s", index, drop.Path)
-			drops = append(drops, drop)
-		}
+		drops = append(drops, dialect.ShapeDrops(raw, interaction.Steps[index], dialect.IndexedPath("steps", index))...)
 	}
 	return dialect.Recognised{Pieces: pieces, Drops: drops}, nil
 }
@@ -379,12 +351,12 @@ func openPieces(index int, step wireStep) []base.Piece {
 	if kind == "" {
 		return nil
 	}
-	pieces := []base.Piece{base.OpenPiece(key(index), kind)}
+	pieces := []base.Piece{base.OpenPiece(dialect.Key(index), kind)}
 	if step.Type == stepFunctionCall {
-		pieces = append(pieces, base.CallPiece(key(index), step.ID, step.Name))
+		pieces = append(pieces, base.CallPiece(dialect.Key(index), step.ID, step.Name))
 	}
 	if step.Signature != "" {
-		pieces = append(pieces, base.StatePiece(key(index), step.Signature))
+		pieces = append(pieces, base.StatePiece(dialect.Key(index), step.Signature))
 	}
 	return pieces
 }
@@ -400,12 +372,12 @@ func contentPieces(index int, step wireStep) []base.Piece {
 		if text.Len() == 0 {
 			return nil
 		}
-		return []base.Piece{base.TextPiece(key(index), text.String())}
+		return []base.Piece{base.TextPiece(dialect.Key(index), text.String())}
 	case stepFunctionCall:
 		if len(step.Arguments) == 0 {
 			return nil
 		}
-		return []base.Piece{base.ArgsPiece(key(index), string(step.Arguments))}
+		return []base.Piece{base.ArgsPiece(dialect.Key(index), string(step.Arguments))}
 	}
 	return nil
 }
@@ -413,11 +385,11 @@ func contentPieces(index int, step wireStep) []base.Piece {
 func deltaPieces(index int, delta wireDelta) []base.Piece {
 	switch delta.Type {
 	case "text":
-		return []base.Piece{base.TextPiece(key(index), delta.Text)}
+		return []base.Piece{base.TextPiece(dialect.Key(index), delta.Text)}
 	case "thought_signature":
-		return []base.Piece{base.StatePiece(key(index), delta.Signature)}
+		return []base.Piece{base.StatePiece(dialect.Key(index), delta.Signature)}
 	case "arguments_delta":
-		return []base.Piece{base.ArgsPiece(key(index), delta.Arguments)}
+		return []base.Piece{base.ArgsPiece(dialect.Key(index), delta.Arguments)}
 	}
 	return nil
 }
@@ -434,19 +406,12 @@ func outcomePieces(interaction wireInteraction) []base.Piece {
 			TotalTokens:  interaction.Usage.TotalTokens,
 		}))
 	}
-	if interaction.Status == "incomplete" {
-		return append(pieces, base.OutcomePiece(base.StatusIncomplete,
-			&base.IncompleteDetails{Reason: "max_output_tokens"}, nil))
-	}
-	return append(pieces, base.OutcomePiece(base.StatusCompleted, nil, nil))
+	return append(pieces, dialect.Outcome(interaction.Status, terminalStatuses))
 }
 
-func kindOf(stepType string) base.ItemType {
-	if kind, known := stepKinds[stepType]; known {
-		return kind
-	}
-	return ""
-}
+var terminalStatuses = map[string]string{"incomplete": "max_output_tokens"}
+
+func kindOf(stepType string) base.ItemType { return stepKinds[stepType] }
 
 var stepKinds = map[string]base.ItemType{
 	stepThought:      base.ItemReasoning,
@@ -463,18 +428,6 @@ func createdAt(stamp string) int64 {
 		return 0
 	}
 	return parsed.Unix()
-}
-
-func key(index int) string { return strconv.Itoa(index) }
-
-func joinSystem(existing, addition string) string {
-	if existing == "" {
-		return addition
-	}
-	if addition == "" {
-		return existing
-	}
-	return existing + "\n\n" + addition
 }
 
 type wireRequest struct {
@@ -531,20 +484,15 @@ type wireAllowed struct {
 	Tools []string `json:"tools"`
 }
 
-type wireError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
 type wireInteraction struct {
-	Error    *wireError        `json:"error"`
-	ID       string            `json:"id"`
-	Model    string            `json:"model"`
-	Status   string            `json:"status"`
-	Created  string            `json:"created"`
-	Steps    []wireStep        `json:"steps"`
-	RawSteps []json.RawMessage `json:"-"`
-	Usage    *wireUsage        `json:"usage"`
+	Error    *dialect.WireError `json:"error"`
+	ID       string             `json:"id"`
+	Model    string             `json:"model"`
+	Status   string             `json:"status"`
+	Created  string             `json:"created"`
+	Steps    []wireStep         `json:"steps"`
+	RawSteps []json.RawMessage  `json:"-"`
+	Usage    *wireUsage         `json:"usage"`
 }
 
 func (i *wireInteraction) UnmarshalJSON(data []byte) error {
@@ -553,14 +501,8 @@ func (i *wireInteraction) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var envelope struct {
-		Steps []json.RawMessage `json:"steps"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return err
-	}
 	*i = wireInteraction(decoded)
-	i.RawSteps = envelope.Steps
+	i.RawSteps = dialect.RawElements(data, "steps")
 	return nil
 }
 
@@ -571,12 +513,12 @@ type wireUsage struct {
 }
 
 type wireEvent struct {
-	Error       *wireError       `json:"error"`
-	EventType   string           `json:"event_type"`
-	Index       int              `json:"index"`
-	Step        *wireStep        `json:"step"`
-	Delta       *wireDelta       `json:"delta"`
-	Interaction *wireInteraction `json:"interaction"`
+	Error       *dialect.WireError `json:"error"`
+	EventType   string             `json:"event_type"`
+	Index       int                `json:"index"`
+	Step        *wireStep          `json:"step"`
+	Delta       *wireDelta         `json:"delta"`
+	Interaction *wireInteraction   `json:"interaction"`
 }
 
 type wireDelta struct {

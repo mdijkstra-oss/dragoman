@@ -6,6 +6,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/matthijn/dragoman/internal/base"
@@ -42,13 +43,11 @@ const (
 	ExitUsage   ExitCode = 2
 )
 
-// Failure carries the exit code a problem should produce.
 type Failure struct {
 	Code ExitCode
 	Err  error
 }
 
-// Fail builds a Failure.
 func Fail(code ExitCode, format string, args ...any) Failure {
 	return Failure{Code: code, Err: fmt.Errorf(format, args...)}
 }
@@ -64,7 +63,7 @@ func CodeOf(err error) ExitCode {
 		return ExitOK
 	}
 	var failure Failure
-	if As(err, &failure) {
+	if errors.As(err, &failure) {
 		return failure.Code
 	}
 	return ExitUsage

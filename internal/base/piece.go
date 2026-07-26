@@ -42,7 +42,6 @@ type Piece struct {
 	Error      *ResponseError
 }
 
-// Start identifies the response being built.
 func Start(id, model string, createdAt int64) Piece {
 	return Piece{Kind: PieceStart, ID: id, Model: model, CreatedAt: createdAt}
 }
@@ -60,18 +59,14 @@ func OpenIdentified(key string, kind ItemType, itemID string) Piece {
 	return Piece{Kind: PieceOpen, Key: key, ItemKind: kind, ID: itemID}
 }
 
-// TextPiece carries assistant text.
 func TextPiece(key, text string) Piece { return Piece{Kind: PieceText, Key: key, Text: text} }
 
-// ArgsPiece carries a fragment of a tool call's arguments.
 func ArgsPiece(key, fragment string) Piece {
 	return Piece{Kind: PieceArgs, Key: key, Text: fragment}
 }
 
-// SummaryPiece carries human-readable reasoning summary text.
 func SummaryPiece(key, text string) Piece { return Piece{Kind: PieceSummary, Key: key, Text: text} }
 
-// CallPiece carries the identity of a tool call.
 func CallPiece(key, callID, name string) Piece {
 	return Piece{Kind: PieceCall, Key: key, CallID: callID, Name: name}
 }
@@ -79,10 +74,8 @@ func CallPiece(key, callID, name string) Piece {
 // StatePiece carries provider state for the item it arrived on.
 func StatePiece(key, state string) Piece { return Piece{Kind: PieceState, Key: key, State: state} }
 
-// ClosePiece ends an item.
 func ClosePiece(key string) Piece { return Piece{Kind: PieceClose, Key: key} }
 
-// UsagePiece carries whatever the backend reported.
 func UsagePiece(usage *Usage) Piece { return Piece{Kind: PieceUsage, Usage: usage} }
 
 // FailurePiece carries a provider error that arrived inside a successful HTTP
@@ -91,7 +84,6 @@ func FailurePiece(code, message string) Piece {
 	return OutcomePiece(StatusFailed, nil, &ResponseError{Code: code, Message: message})
 }
 
-// OutcomePiece carries the terminal state.
 func OutcomePiece(status string, incomplete *IncompleteDetails, err *ResponseError) Piece {
 	return Piece{Kind: PieceOutcome, Status: status, Incomplete: incomplete, Error: err}
 }
@@ -107,7 +99,6 @@ func Apply(e Emitter, piece Piece) (Emitter, []Event) {
 	return handler(e, piece)
 }
 
-// ApplyAll folds a piece sequence in order.
 func ApplyAll(e Emitter, pieces []Piece) (Emitter, []Event) {
 	events := []Event{}
 	for _, piece := range pieces {

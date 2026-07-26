@@ -36,11 +36,7 @@ func WalkItems(items []base.Item, handlers Handlers) ([]base.Drop, error) {
 			base.ItemFunctionCallOutput: wrap(handlers.Output),
 		}[item.Type]
 		if !known || handler == nil {
-			drops = append(drops, base.Drop{
-				Path:   fmt.Sprintf("input[%d]", index),
-				Reason: base.DropUnimplemented,
-				Detail: "item type " + string(item.Type) + " is not carried by the base",
-			})
+			drops = append(drops, Unmapped(IndexedPath("input", index), "item type", string(item.Type)))
 			continue
 		}
 		if err := handler(item); err != nil {

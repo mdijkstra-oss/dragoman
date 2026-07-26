@@ -15,7 +15,6 @@ import (
 	"github.com/matthijn/dragoman/internal/core"
 )
 
-// Streams are the file descriptors one run reads and writes.
 type Streams struct {
 	In  io.Reader
 	Out io.Writer
@@ -75,7 +74,6 @@ func OpenInput(path string) (io.ReadCloser, error) {
 	return os.Open(path)
 }
 
-// OpenOutput returns the writer for the result.
 func OpenOutput(path string) (io.WriteCloser, error) {
 	if path == "" || path == "-" {
 		return nopCloser{os.Stdout}, nil

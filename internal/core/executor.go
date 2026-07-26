@@ -13,7 +13,6 @@ import (
 	"github.com/matthijn/dragoman/internal/base"
 )
 
-// Call is one outbound request, fully translated.
 type Call struct {
 	URL     string
 	Headers map[string]string
@@ -37,8 +36,6 @@ type HTTPExecutor struct {
 	Client *http.Client
 }
 
-// NewHTTPExecutor builds an executor with a timeout sized for reasoning models
-// answering under a large output cap.
 func NewHTTPExecutor() HTTPExecutor {
 	return HTTPExecutor{Client: &http.Client{Timeout: 30 * time.Minute}}
 }

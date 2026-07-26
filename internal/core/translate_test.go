@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -388,8 +389,8 @@ func lookup(body map[string]any, path string) string {
 			}
 			current = value
 		case []any:
-			index := 0
-			if _, err := fmtSscan(segment, &index); err != nil || index >= len(typed) {
+			index, err := strconv.Atoi(segment)
+			if err != nil || index < 0 || index >= len(typed) {
 				return ""
 			}
 			current = typed[index]
@@ -406,24 +407,6 @@ func lookup(body map[string]any, path string) string {
 	}
 	return strings.Trim(string(encoded), `"`)
 }
-
-func fmtSscan(text string, target *int) (int, error) {
-	value := 0
-	for _, digit := range text {
-		if digit < '0' || digit > '9' {
-			return 0, errNotAnIndex
-		}
-		value = value*10 + int(digit-'0')
-	}
-	*target = value
-	return 1, nil
-}
-
-var errNotAnIndex = errorString("not an index")
-
-type errorString string
-
-func (e errorString) Error() string { return string(e) }
 
 func equalJSON(left, right map[string]any) bool {
 	a, errA := json.Marshal(left)
