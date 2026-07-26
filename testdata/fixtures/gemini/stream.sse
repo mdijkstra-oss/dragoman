@@ -1,0 +1,21 @@
+event: interaction.created
+data: {"interaction":{"id":"v1_ChdESVptYW9xa05QemR2ZElQNVBpQi1BURIXRElabWFvcWtOUHpkdmRJUDVQaUItQVE","status":"in_progress","object":"interaction","model":"gemini-3.6-flash"},"event_type":"interaction.created"}
+
+event: interaction.status_update
+data: {"interaction_id":"v1_ChdESVptYW9xa05QemR2ZElQNVBpQi1BURIXRElabWFvcWtOUHpkdmRJUDVQaUItQVE","status":"in_progress","event_type":"interaction.status_update"}
+
+event: step.start
+data: {"index":0,"step":{"id":"4pGvhKKW","signature":"EvQFCvEFARFNMg8NLjYmn6XWM76BHpsZehGYO2X2U3rVao9IyyKXteMxqh1l2E7ZH7RUlzUK30+VkGG4dsK/EM5qL8yX8UUFHr11m36yCD9TFeXnmCekqaFq2+80TfB9HTHz9f7UYq13lLr526f5ubdt7yz4KUWuJmetIght6jRDm+ZxrK7ghEUA83eAYTZkLgpaXm25y3fl8slQitBL7x2EahMSlUUNEqqXa2ukt6Z5KCktggZamklJS+wY6x0kKNjm6jdEBHxeMmI9SD7m+dL+SSQm4p5prT3fCESJdQNRBH9P+j/UZKNvkiAjFhzHOvLUfWsrJlg+73vBV6o5lc1MsCRcCSjzXzz2Pk9Rbr9D5C35ixqwKLsEtxU/720ni2DgT67GgHiWaJehT5FIYCZLSAza4wcu/GT71XcwVJ6sFB48x5OkxkG44EjgyhUcspwrm6ZjyHDQjaXXujr5QNyUXHFuSDDT7ZgzB6MI8sPACAmE8AuK5ZmN++87gB9FZ0SlUtxAZ+ZoZZJQ5wQZ1GKIjhDIQpaHU0OaghYYeH6nUfiPd20e2H/RA7V/Fobzl/M7APXyasQ+cHFWBsuI/90vzoh/0eUllPtNKuBa6rqMi91kLIkB8nv3ZF/Rhd/xQPLC+xDMJ64qZqW9Bbs1WGsvRGdrT8vOUmUN8mJwVBm4B58JWgiOSJ9/IgRxN8D04Wp/BdRu83I+qKHYF1xiG0oeRLFKYFNKjO4FAojYkfBheJ/MMtbufPbHLGam7SSHshEelLNHjwPA7ayQDvNA8YYiB7YeWSEt0doFcsNvfFhNNRu1IGbGLoA4BtFFmB9KU6wvGNtGxNfK5y4q63l6e7/sz7y5TdZ7iNzSzbz6665nDKbpFoSNXISBRyNI2uWS0AcwhfNY2gfRWaxGKBndJ5QYfRtAAGbqLN234mDZ0WZRLpbjMSwWcG2kjvVJSVHXLMkLvRMOAk2Q3ZG1ztBLFyWBuTe3rB8VLM3h0s13xsZ2eIapNuv3","type":"function_call","name":"get_weather","arguments":{}},"event_type":"step.start"}
+
+event: step.delta
+data: {"index":0,"delta":{"arguments":"{\"unit\":\"celsius\",\"location\":\"Rio de Janeiro\"}","type":"arguments_delta"},"event_type":"step.delta"}
+
+event: step.stop
+data: {"index":0,"event_type":"step.stop"}
+
+event: interaction.completed
+data: {"interaction":{"id":"v1_ChdESVptYW9xa05QemR2ZElQNVBpQi1BURIXRElabWFvcWtOUHpkdmRJUDVQaUItQVE","status":"requires_action","usage":{"total_tokens":294,"total_input_tokens":104,"input_tokens_by_modality":[{"modality":"text","tokens":104}],"total_cached_tokens":0,"total_output_tokens":25,"total_tool_use_tokens":0,"total_thought_tokens":165},"created":"2026-07-26T22:11:26Z","updated":"2026-07-26T22:11:26Z","service_tier":"standard","object":"interaction","model":"gemini-3.6-flash"},"event_type":"interaction.completed"}
+
+event: done
+data: [DONE]
+

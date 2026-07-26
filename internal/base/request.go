@@ -1,0 +1,208 @@
+package base
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// Request is an openai-responses request body. Optional scalars are pointers so
+// that absent stays absent: a level nobody asked for is never filled in, since
+// providers default differently and inventing one silently changes both cost
+// and behaviour.
+type Request struct {
+	Model             *string        `json:"model,omitempty"`
+	Instructions      *string        `json:"instructions,omitempty"`
+	Input             Input          `json:"input,omitempty"`
+	Tools             []Tool         `json:"tools,omitempty"`
+	ToolChoice        *ToolChoice    `json:"tool_choice,omitempty"`
+	Text              *TextConfig    `json:"text,omitempty"`
+	Reasoning         *Reasoning     `json:"reasoning,omitempty"`
+	MaxOutputTokens   *int           `json:"max_output_tokens,omitempty"`
+	Stream            *bool          `json:"stream,omitempty"`
+	ParallelToolCalls *bool          `json:"parallel_tool_calls,omitempty"`
+	Store             *bool          `json:"store,omitempty"`
+	Include           []string       `json:"include,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
+
+	// Raw is the body exactly as it arrived. The openai-responses backend
+	// passes it through unchanged when no flag overrides it, which is what
+	// makes that path a faithful pass-through, and the dropped-field diff is
+	// computed against it.
+	Raw json.RawMessage `json:"-"`
+}
+
+// Input is a Responses input, which is either a bare string or an item list.
+// The base is the same format as the wire, so both forms have to arrive.
+type Input []Item
+
+// Tool is a function tool definition. Responses keeps the schema flat; other
+// dialects nest it at their own depth. A tool whose type is not "function"
+// names a capability dragoman does not carry.
+type Tool struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
+}
+
+// ToolChoice is either a mode string (auto, none, required) or a named
+// function. Every dialect spells the named form differently.
+type ToolChoice struct {
+	Mode string
+	Name string
+	// Raw is the shape as it arrived. Responses has forms beyond a mode and a
+	// named function; keeping the bytes lets the base round-trip them and lets
+	// a dialect that cannot express one report it rather than invent a value.
+	Raw json.RawMessage
+}
+
+// Known reports whether a tool choice is one of the forms every dialect can
+// express: a mode, or a named function.
+func (c ToolChoice) Known() bool {
+	if c.Name != "" {
+		return true
+	}
+	return c.Mode == ToolChoiceAuto || c.Mode == ToolChoiceNone || c.Mode == ToolChoiceRequired
+}
+
+// TextConfig carries the structured-output format.
+type TextConfig struct {
+	Format    *Format `json:"format,omitempty"`
+	Verbosity *string `json:"verbosity,omitempty"`
+}
+
+// Format is a structured-output request. Responses nests strict here; the two
+// OpenAI dialects disagree with each other on the depth.
+type Format struct {
+	Type   string          `json:"type"`
+	Name   string          `json:"name,omitempty"`
+	Schema json.RawMessage `json:"schema,omitempty"`
+	Strict *bool           `json:"strict,omitempty"`
+}
+
+// Reasoning carries the reasoning level. The value is opaque and passes
+// through byte for byte.
+type Reasoning struct {
+	Effort  *string `json:"effort,omitempty"`
+	Summary *string `json:"summary,omitempty"`
+}
+
+const (
+	ToolChoiceAuto     = "auto"
+	ToolChoiceNone     = "none"
+	ToolChoiceRequired = "required"
+	ToolChoiceFunction = "function"
+)
+
+// ParseRequest decodes a Responses body into the base, keeping the raw bytes
+// beside the typed fields.
+func ParseRequest(body []byte) (Request, error) {
+	var req Request
+	if err := json.Unmarshal(body, &req); err != nil {
+		return Request{}, fmt.Errorf("parse request: %w", err)
+	}
+	req.Raw = append(json.RawMessage(nil), body...)
+	return req, nil
+}
+
+// GetModel returns the model the request carries, or the empty string.
+func GetModel(req Request) string {
+	if req.Model == nil {
+		return ""
+	}
+	return *req.Model
+}
+
+// GetEffort returns the reasoning level the request carries, or the empty
+// string. The value is never normalised, case-folded, or validated.
+func GetEffort(req Request) string {
+	if req.Reasoning == nil || req.Reasoning.Effort == nil {
+		return ""
+	}
+	return *req.Reasoning.Effort
+}
+
+// GetStream reports whether the caller asked for the event sequence.
+func GetStream(req Request) bool { return req.Stream != nil && *req.Stream }
+
+// GetFormat returns the structured-output format, if any.
+func GetFormat(req Request) *Format {
+	if req.Text == nil {
+		return nil
+	}
+	return req.Text.Format
+}
+
+// HasMixedStrictness reports whether the tools disagree about strictness,
+// which a per-request strictness dialect cannot express.
+func HasMixedStrictness(tools []Tool) bool {
+	seenStrict, seenLoose := false, false
+	for _, tool := range tools {
+		if tool.Strict != nil && *tool.Strict {
+			seenStrict = true
+			continue
+		}
+		seenLoose = true
+	}
+	return seenStrict && seenLoose
+}
+
+func (i *Input) UnmarshalJSON(data []byte) error {
+	var prompt string
+	if err := json.Unmarshal(data, &prompt); err == nil {
+		*i = Input{TextItem(RoleUser, PartInputText, prompt)}
+		return nil
+	}
+	var items []Item
+	if err := json.Unmarshal(data, &items); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
+	*i = items
+	return nil
+}
+
+// TextItem builds a single-part message item.
+func TextItem(role, partType, text string) Item {
+	return Item{Type: ItemMessage, Role: role, Content: []ContentPart{{Type: partType, Text: text}}}
+}
+
+// IsFunctionTool reports whether a tool is the one kind every dialect carries.
+// A hosted capability named in the tool list belongs to the provider, not to
+// dragoman, and is reported rather than encoded as a nameless function.
+func IsFunctionTool(tool Tool) bool { return tool.Type == "" || tool.Type == "function" }
+
+func (c ToolChoice) MarshalJSON() ([]byte, error) {
+	if len(c.Raw) > 0 && !c.Known() {
+		return c.Raw, nil
+	}
+	if c.Name != "" {
+		return json.Marshal(namedChoice{Type: ToolChoiceFunction, Name: c.Name})
+	}
+	return json.Marshal(c.Mode)
+}
+
+func (c *ToolChoice) UnmarshalJSON(data []byte) error {
+	raw := append(json.RawMessage(nil), data...)
+	var mode string
+	if err := json.Unmarshal(data, &mode); err == nil {
+		*c = ToolChoice{Mode: mode, Raw: raw}
+		return nil
+	}
+	var named namedChoice
+	if err := json.Unmarshal(data, &named); err != nil {
+		return fmt.Errorf("tool_choice: %w", err)
+	}
+	*c = ToolChoice{Mode: named.Type, Name: named.Name, Raw: raw}
+	if named.Type != ToolChoiceFunction {
+		// A shape the base does not model keeps its bytes and loses its
+		// name, so a dialect asks Known() rather than guessing at Mode.
+		c.Name = ""
+	}
+	return nil
+}
+
+type namedChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
+}

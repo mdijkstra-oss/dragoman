@@ -1,0 +1,123 @@
+{
+  "id": "resp_0e5d1a285ab40b4c006a6686036a84819da660c3ca05174cc7",
+  "object": "response",
+  "created_at": 1785103875,
+  "status": "completed",
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1785103876,
+  "error": null,
+  "frequency_penalty": 0.0,
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "model": "gpt-5.4-mini-2026-03-17",
+  "moderation": null,
+  "output": [
+    {
+      "id": "rs_0e5d1a285ab40b4c006a6686040250819da4f9fd5f9c32fab0",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqZoYElxVFn55--cLP8zsKR2gAcXSVTuvhIoF8VxPbRMhQSN-EhUPgUXEAdC7a61xuTLNpiMG6-AMyqR28Fph_mwU36hIxWZ_S4X0mtLzGR2eswmoB89kLgeq_GRitOhMNdh9XKsMCqadHYts8kil56Oay84oaQmOrqp6-asueHwg0qJqtSqWxJ3T0vtFJyX37_dSSCxeddo2x-z4wtwhoqgiU20MbFKfQh4Xbujpc98t13LuWcxngLmMhgJcIxCFGRFMo5jC4_MUBA34vSjBl0BAmKHMl_96APTQVTa2EqmsiLZfrJyesDQ2HURik_lGV6VTl0fvVGvZ8AB12la7CO0tV1hGWvXWretgGFJ_aFfmspdkUD3A-NKJX2BdeBGnUQTbrFv2Bu1rdFrC-y-uX30IAd7NEbqIX7gbe4YJ_PdeNH9QASXquOxRjcaTWd6UIK6bQ00cA4r7JFAdpJGEpmxdcEZihDUqabAwVPFrm3pBBh3CvmWIn1hbptUoWaNsmJvADyQAd9ETAm1OnXDubV28oZkijXpme4eb1siUzUfeGWajUIkQ-BGQA4BI04-HizjGbu4IcVRHJMxu5e_zqpeAHdER5ppqacd_CC16RDmwJaAN7qy28-vvnIewe_w0G6uTHDDugsItb3ArY0myFIZVtmyTukfdZZ4yTsPiYPLYrFZxPykwmAQ4MCMZIUCLEniGm0oHCxVyWhObsYfVGsfixiKk9ck8pkHbdc6ac9DwYnGV7T5fXYQFWCJFqCGqje08HdD7f0MC9H1XO88CPbhO3ctdjpaT-rufQUXK8aApGYHo72jzqSbHOVSxEpk83_EwtQdyrPVtTswJ4fSzEra-A5yumYXmQG9YLzXfAmSwdSN3I34W4alGavOMZarxfWHB8GIit0jCXBLKm1uQd8PQHwPszJj7ibHfnqBTBz3FUDVfEFLGzGtxGU2udBKyNzwgRQYQpoV2pNdCLpe55v0thFCMdo2opZI3kAtYIS1-7966O6TecztI97Nihx1wk9BvXSHOgagGQOmUJG-iETzDYtI0ilCiq3Nxox3hGdkyw0QmEyTm4l43ZsPydS_LluoGFnr0P0-FWKiq3vxpg3MgNPsT63TCj1MoujdshZcfrNAqoE-jxVerpU32CgCkI0OErFSCECx7-2QFM3RXW0NVZpjkscnNfWSsfvz-l3OzqI6OPvaKkoU_o-23BifdPCdI9Xa1nJWJdEOpul_-9DWaICg==",
+      "summary": []
+    },
+    {
+      "id": "fc_0e5d1a285ab40b4c006a6686044aac819d91faa89775bf2d26",
+      "type": "function_call",
+      "status": "completed",
+      "arguments": "{\"location\":\"Rio de Janeiro\",\"unit\":\"celsius\"}",
+      "call_id": "call_VrXRYPNmJ32zfPAAoCzlOmqc",
+      "name": "get_weather"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0.0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "24h",
+  "reasoning": {
+    "context": "current_turn",
+    "effort": "medium",
+    "mode": "standard",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tool_usage": {
+    "image_gen": {
+      "input_tokens": 0,
+      "input_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "total_tokens": 0
+    },
+    "web_search": {
+      "num_requests": 0
+    }
+  },
+  "tools": [
+    {
+      "type": "function",
+      "description": "Get the current weather in a given location",
+      "name": "get_weather",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "City name"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "celsius",
+              "fahrenheit"
+            ]
+          }
+        },
+        "required": [
+          "location",
+          "unit"
+        ],
+        "additionalProperties": false
+      },
+      "strict": true
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 80,
+    "input_tokens_details": {
+      "cache_write_tokens": 0,
+      "cached_tokens": 0
+    },
+    "output_tokens": 74,
+    "output_tokens_details": {
+      "reasoning_tokens": 47
+    },
+    "total_tokens": 154
+  },
+  "user": null,
+  "metadata": {}
+}
