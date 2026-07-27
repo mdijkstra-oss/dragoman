@@ -84,7 +84,7 @@ func TestListenerAddsFramingAndNothingElse(t *testing.T) {
 		t.Run(service, func(t *testing.T) {
 			body := requestBody(t, false)
 			server := listen(t, serve.Config{Executor: fixtures(service)})
-			answered := send(t, server, http.MethodPost, "/responses/"+service, body)
+			answered := send(t, server, http.MethodPost, "/"+service+"/responses", body)
 
 			if answered.status != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
@@ -108,7 +108,7 @@ func TestStreamIsReframedEventForEvent(t *testing.T) {
 		t.Run(service, func(t *testing.T) {
 			body := requestBody(t, true)
 			server := listen(t, serve.Config{Executor: fixtures(service)})
-			answered := send(t, server, http.MethodPost, "/responses/"+service, body)
+			answered := send(t, server, http.MethodPost, "/"+service+"/responses", body)
 
 			if answered.status != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
@@ -151,14 +151,14 @@ func TestStatusMapping(t *testing.T) {
 		{
 			name:   "a translated request is 200",
 			method: http.MethodPost,
-			path:   "/responses/anthropic",
+			path:   "/anthropic/responses",
 			body:   requestBody(t, false),
 			status: http.StatusOK,
 		},
 		{
 			name:      "an unknown service is 404 naming what is served",
 			method:    http.MethodPost,
-			path:      "/responses/nowhere",
+			path:      "/nowhere/responses",
 			body:      requestBody(t, false),
 			status:    http.StatusNotFound,
 			errorType: "invalid_request_error",
@@ -167,7 +167,7 @@ func TestStatusMapping(t *testing.T) {
 		{
 			name:      "an unset credential is 500 naming the variable",
 			method:    http.MethodPost,
-			path:      "/responses/anthropic",
+			path:      "/anthropic/responses",
 			body:      requestBody(t, false),
 			unset:     keyEnv,
 			status:    http.StatusInternalServerError,
@@ -177,7 +177,7 @@ func TestStatusMapping(t *testing.T) {
 		{
 			name:      "an unparseable body is 400",
 			method:    http.MethodPost,
-			path:      "/responses/anthropic",
+			path:      "/anthropic/responses",
 			body:      []byte(`{"input":`),
 			status:    http.StatusBadRequest,
 			errorType: "invalid_request_error",
@@ -186,7 +186,7 @@ func TestStatusMapping(t *testing.T) {
 		{
 			name:      "a wrong method is 405",
 			method:    http.MethodGet,
-			path:      "/responses/anthropic",
+			path:      "/anthropic/responses",
 			status:    http.StatusMethodNotAllowed,
 			errorType: "invalid_request_error",
 			mentions:  []string{http.MethodPost},
@@ -232,7 +232,7 @@ func TestSelfAuthenticatingServiceIsServed(t *testing.T) {
 	}
 
 	server := listen(t, serve.Config{Executor: fixtures("anthropic")})
-	answered := send(t, server, http.MethodPost, "/responses/claude-cli", requestBody(t, false))
+	answered := send(t, server, http.MethodPost, "/claude-cli/responses", requestBody(t, false))
 
 	if answered.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
@@ -299,7 +299,7 @@ func TestDropsGoToTheLogAndNotTheBody(t *testing.T) {
 		Executor: fixtures("anthropic"),
 		Log:      slog.New(slog.NewTextHandler(logged, nil)),
 	})
-	answered := send(t, server, http.MethodPost, "/responses/anthropic", droppableBody())
+	answered := send(t, server, http.MethodPost, "/anthropic/responses", droppableBody())
 
 	if answered.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
@@ -333,7 +333,7 @@ func TestStrictRefusesBeforeSending(t *testing.T) {
 				Executor: counted{inner: fixtures("anthropic"), calls: &calls},
 				Strict:   true,
 			})
-			answered := send(t, server, http.MethodPost, "/responses/anthropic",
+			answered := send(t, server, http.MethodPost, "/anthropic/responses",
 				streamed(t, droppableBody(), testCase.streaming))
 
 			if answered.status != http.StatusBadRequest {

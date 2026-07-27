@@ -42,7 +42,7 @@ anticipated a config edit rather than a fork.
 the YAML and no merge between them. The default table ships as a file embedded in the
 binary, and `--config` replaces it wholesale.
 
-This is not a server-only feature. `--backend` on the CLI and `/responses/<service>` on the
+This is not a server-only feature. `--backend` on the CLI and `/<service>/responses` on the
 listener resolve the same name from the same table, so adding `groq:` to a config gives both
 at once. Two tables would drift, and the one that drifted would be the one not being tested.
 
@@ -149,7 +149,7 @@ to `openai-chat-completions`. Same endpoint, same key, same bytes on the wire.
 ### The listener
 
 ```
-POST /responses/<service>
+POST /<service>/responses
 ```
 
 The path segment is a key in the service table. Unknown segment is `404` naming the service
@@ -279,7 +279,7 @@ The listener is tested over a real `net/http/httptest` server against the record
 already in `testdata/fixtures/`, with the same `Executor` seam the pipe tests use. No mocks
 and no network. Table-driven, and the cases that matter are the ones the design claims:
 
-- the same request to `/responses/<service>` and through the pipe produces the same body,
+- the same request to `/<service>/responses` and through the pipe produces the same body,
   for every fixture and every backend — the listener adds framing and nothing else
 - SSE reframing of a stream is the pipe's NDJSON sequence with `data: ` prefixes, event for
   event

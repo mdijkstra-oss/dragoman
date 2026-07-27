@@ -92,7 +92,7 @@ answer to what this instance serves. The consequence to accept is that a config
 naming one service serves exactly that one; `dragoman config` prints the
 embedded table for exactly that reason, to be copied and edited.
 
-`--backend` on the pipe and `/responses/<service>` on the listener resolve the
+`--backend` on the pipe and `/<service>/responses` on the listener resolve the
 same name from the same table, so a service added once is served by both. Two
 tables would drift, and the one that drifted would be the one not under test.
 
@@ -134,7 +134,7 @@ dragoman --backend claude-cli --model sonnet < request.json
 ```
 
 It is a row of the same table as every other service, so the listener serves it
-too — `POST /responses/claude-cli` reaches the same backend the pipe does, and
+too — `POST /claude-cli/responses` reaches the same backend the pipe does, and
 `GET /services` reports it with an empty `auth`.
 
 `--backend claude-cli` is sugar for `--backend-protocol anthropic-messages
@@ -233,7 +233,7 @@ dragoman serve --addr 127.0.0.1:8080 --config ./dragoman.yaml
 
 | route | purpose |
 |---|---|
-| `POST /responses/<service>` | the path segment is a key in the service table; the body is an unmodified `openai-responses` request |
+| `POST /<service>/responses` | the path segment is a key in the service table; the body is an unmodified `openai-responses` request |
 | `GET /services` | the table as JSON — name, protocol, endpoint, and the variable each needs. Never a key, and never whether one is set |
 | `GET /health` | liveness only |
 

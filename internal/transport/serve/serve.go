@@ -62,7 +62,7 @@ func New(cfg Config) http.Handler {
 		log:      logger(cfg.Log),
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/responses/{service}", listener.only(http.MethodPost, listener.translate))
+	mux.HandleFunc("/{service}/responses", listener.only(http.MethodPost, listener.translate))
 	mux.HandleFunc("/services", listener.only(http.MethodGet, listener.services))
 	mux.HandleFunc("/health", listener.only(http.MethodGet, health))
 	mux.HandleFunc("/", listener.unrouted)
@@ -150,7 +150,7 @@ func (s server) services(w http.ResponseWriter, _ *http.Request) {
 
 func (s server) unrouted(w http.ResponseWriter, r *http.Request) {
 	s.fail(w, r, http.StatusNotFound, fmt.Sprintf("no route for %s; this instance serves "+
-		"POST /responses/<service>, GET /services and GET /health", r.URL.Path))
+		"POST /<service>/responses, GET /services and GET /health", r.URL.Path))
 }
 
 func health(w http.ResponseWriter, _ *http.Request) {
