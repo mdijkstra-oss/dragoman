@@ -212,8 +212,11 @@ func statusOf(err error) int {
 // hasCredential asks the question core.Run asks again before it calls a
 // backend. It is asked twice because the answer decides a status and the core
 // cannot say which of its usage failures this was; a distinguishable failure in
-// the core is the fix, not a check the transport keeps.
-func hasCredential(backend base.Backend) bool { return os.Getenv(backend.KeyEnv) != "" }
+// the core is the fix, not a check the transport keeps. A service that names no
+// variable holds its own credential and has nothing to be missing.
+func hasCredential(backend base.Backend) bool {
+	return backend.KeyEnv == "" || os.Getenv(backend.KeyEnv) != ""
+}
 
 // getServices renders the table as data, sorted so an instance describes itself
 // the same way twice.

@@ -132,7 +132,10 @@ func translateCommand(cli TranslateCmd) int {
 	defer buffered.Flush()
 
 	streams := pipe.Streams{In: input, Out: buffered, Err: os.Stderr}
-	return pipe.Run(context.Background(), known, options, streams, core.NewHTTPExecutor(),
+	// How a backend is reached follows from its endpoint, which the core
+	// resolves against the table; the CLI owns argv, the streams and the exit
+	// code, and nothing else.
+	return pipe.Run(context.Background(), known, options, streams, nil,
 		pipe.Report{Verbose: cli.Verbose, Timing: cli.Timing})
 }
 
@@ -142,10 +145,9 @@ func serveCommand(cli ServeCmd) int {
 		return fail(err)
 	}
 	handler := serve.New(serve.Config{
-		Catalog:  known,
-		Executor: core.NewHTTPExecutor(),
-		Strict:   cli.Strict,
-		Log:      slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Catalog: known,
+		Strict:  cli.Strict,
+		Log:     slog.New(slog.NewTextHandler(os.Stderr, nil)),
 	})
 	fmt.Fprintf(os.Stderr, "dragoman: serving %s on %s\n",
 		strings.Join(names(known), ", "), cli.Addr)
@@ -201,7 +203,7 @@ func table(path string) (core.Catalog, error) {
 	if err != nil {
 		return core.Catalog{}, err
 	}
-	return core.Catalog{Dialects: catalog.Dialects(), Presets: services}, nil
+	return core.Catalog{Dialects: catalog.Dialects(), Presets: services, Executors: catalog.Executors()}, nil
 }
 
 // parse runs kong and converts its exit into dragoman's own, so that a bad flag

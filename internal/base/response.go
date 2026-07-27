@@ -3,6 +3,7 @@ package base
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Response is an openai-responses response body. This is what the caller
@@ -102,4 +103,16 @@ func ParseResponse(body []byte) (Response, error) {
 
 func FindCalls(resp Response) []Item {
 	return FilterItems(resp.Output, func(item Item) bool { return item.Type == ItemFunctionCall })
+}
+
+// FindText returns the answer's prose, with the runs of a multi-item response
+// joined. dragoman never renders or concatenates on the way out; this reads a
+// response that has already been produced.
+func FindText(resp Response) string {
+	messages := FilterItems(resp.Output, func(item Item) bool { return item.Type == ItemMessage })
+	runs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		runs = append(runs, GetText(message))
+	}
+	return strings.Join(runs, "")
 }

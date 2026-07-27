@@ -1,6 +1,7 @@
 # make run PROMPT="..." [MODEL=] [REASONING=] [ARGS=]
 # make run PROMPT=@prompt.txt      the prompt is read from that file
 # make run < request.json          no PROMPT: a whole request off stdin
+# make run BACKEND=claude-cli      the locally installed CLI; no key needed
 # Keys come from .env.local. ARGS goes straight to dragoman (--stream, --raw,
 # --no-execute, -v ...). JQ=. prints the whole response.
 

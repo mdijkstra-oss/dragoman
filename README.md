@@ -100,7 +100,9 @@ A table naming a protocol dragoman does not speak, or a service missing
 `endpoint` or `auth`, fails at load: exit `2`, dragoman could not run. **An unset
 environment variable is not a load failure.** It fails when that service is
 called, naming the variable, because an instance serving six providers has to
-start with the one key its operator holds.
+start with the one key its operator holds. `auth` is required of every service
+dragoman reaches over the network; the one kind that holds its own credential is
+[the local CLI](#the-local-cli).
 
 Nothing has to be in a table at all:
 
@@ -120,6 +122,49 @@ into a config is a key in a repository, and this file is meant to be committed.
 The header the key travels in is not configured either: `x-api-key`,
 `Authorization: Bearer`, `x-goog-api-key` is placement, and placement is
 structural.
+
+## The local CLI
+
+One service is a process rather than a URL. `claude-cli` spawns a locally
+installed Claude Code, which authenticates itself, so a developer with a
+subscription and no API key can route a request through it:
+
+```sh
+dragoman --backend claude-cli --model sonnet < request.json
+```
+
+It is a row of the same table as every other service, so the listener serves it
+too — `POST /responses/claude-cli` reaches the same backend the pipe does, and
+`GET /services` reports it with an empty `auth`.
+
+`--backend claude-cli` is sugar for `--backend-protocol anthropic-messages
+--endpoint exec:claude`, and the `exec:` scheme is what selects a process. The
+scheme also carries what such a backend cannot do, so naming the binary in
+flags behaves exactly as the table entry does.
+
+The CLI is an agent by default — it reads `CLAUDE.md`, runs hooks, resolves
+skills and plugins, persists a session and executes tools. None of that was
+asked for by a caller who sent a Responses body, so dragoman fixes the flags
+that turn it back into a model endpoint and does not make them configurable.
+
+**What it cannot do is dropped, loudly.** Reaching an agent harness costs three
+capabilities:
+
+| dropped | why |
+|---|---|
+| `tools[n]`, `tool_choice`, `parallel_tool_calls` | the CLI resolves its own tools and has no channel to hand a call back |
+| `max_output_tokens` | it has no flag for an output cap |
+
+A second **user** message is not a drop but a refusal, exit `2` naming both
+paths. The CLI runs a turn per user message, so sending one would run an extra
+turn whose answer nobody asked for, and dropping one would change the
+conversation. A tool result counts as a user turn.
+
+> The envelope is: any amount of context, exactly one question, no tools the
+> caller owns. A one-shot client works; a chat client does not.
+
+Two preflight checks run before the call, both exit `2`: the binary is on
+`PATH`, and `claude auth status` reports a session. Neither costs a token.
 
 ## Model and effort
 
@@ -303,7 +348,9 @@ internal/dialect/              the shape every wire format implements
 internal/dialect/*/            one package per dialect
 internal/config/               the service table — YAML in, backends out, and
                                the embedded default
-internal/core/                 flag precedence, backend selection, the pipeline
+internal/core/                 flag precedence, backend selection, the pipeline,
+                               and the executors that reach a backend over HTTP
+                               or by spawning a local CLI
 internal/catalog/              the protocols dragoman speaks, and the table
                                built out of them
 internal/transport/pipe/       stdin to stdout

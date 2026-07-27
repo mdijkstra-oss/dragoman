@@ -54,6 +54,13 @@ func TestDefaultTableIsTheShippedBackends(t *testing.T) {
 			Name: "openai-chat", Dialect: "openai-chat-completions",
 			Endpoint: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY",
 		},
+		// The one service reached by spawning a binary: no key, and no limits
+		// stated here, because those follow from the scheme rather than the
+		// table.
+		"claude-cli": {
+			Name: "claude-cli", Dialect: "anthropic-messages",
+			Endpoint: "exec:claude",
+		},
 	}
 
 	if len(table) != len(want) {
@@ -147,6 +154,24 @@ func TestLoadFailuresNameWhatIsWrong(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSpawnedServiceNeedsNoAuth covers the one exemption from the required
+// variable. A service dragoman reaches by spawning was signed in once,
+// interactively, and there is no variable to name — demanding one would put a
+// key back in front of the only backend that does not need it.
+func TestSpawnedServiceNeedsNoAuth(t *testing.T) {
+	table, err := config.Parse([]byte(`
+local:
+  endpoint: exec:claude
+  protocol: anthropic-messages
+`), protocols)
+	if err != nil {
+		t.Fatalf("a self-authenticating service refused to load: %v", err)
+	}
+	if table["local"].KeyEnv != "" {
+		t.Errorf("auth = %q, want none", table["local"].KeyEnv)
 	}
 }
 

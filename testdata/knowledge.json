@@ -1,0 +1,5 @@
+{
+  "input": [
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"Which city hosted the 2016 Summer Olympics? Answer with the city name and nothing else."}]}
+  ]
+}

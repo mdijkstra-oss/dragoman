@@ -15,9 +15,15 @@ import (
 // anything a preset does has to be expressible in flags, so that an endpoint
 // nobody anticipated is a command line rather than a patch.
 type Catalog struct {
-	Dialects map[string]dialect.Dialect
-	Presets  map[string]base.Backend
+	Dialects  map[string]dialect.Dialect
+	Presets   map[string]base.Backend
+	Executors Executors
 }
+
+// Executors resolves an endpoint's scheme onto the thing that reaches it.
+// Selection is a dispatch table rather than a branch on the endpoint, so a
+// backend that is a process rather than a URL is a table entry.
+type Executors map[string]Executor
 
 // Sink receives each event as it is produced. The core yields events and never
 // decides when they reach a file descriptor.
@@ -57,13 +63,45 @@ func SelectBackend(catalog Catalog, opts Options) (base.Backend, error) {
 	if backend.Endpoint == "" {
 		return base.Backend{}, Fail(ExitUsage, "no endpoint for %q: pass --endpoint", backend.Dialect)
 	}
-	if backend.KeyEnv == "" {
-		backend.KeyEnv = spoken.KeyEnv
-	}
+	backend.KeyEnv = keyEnvFor(backend, spoken)
+	backend = withSchemeLimits(backend)
 	if backend.Name == "" {
 		backend.Name = backend.Dialect
 	}
 	return backend, nil
+}
+
+// withSchemeLimits adds what follows from how a backend is reached rather than
+// from which endpoint it is. A locally installed agent CLI resolves its own
+// tools, takes no output cap and runs a turn per user message. Those are facts
+// about spawning such a binary, so the table entry that names one and the flags
+// that name the same one carry them identically — and getting them wrong is the
+// confident, well-formed, wrong answer this design exists to prevent, which is
+// too much to leave to whether the table was used.
+func withSchemeLimits(backend base.Backend) base.Backend {
+	if !base.IsSpawned(backend.Endpoint) {
+		return backend
+	}
+	reached := backend
+	reached.NoTools = true
+	reached.NoOutputCap = true
+	reached.OneTurnPerRequest = true
+	return reached
+}
+
+// keyEnvFor names the variable a backend authenticates with, or the empty
+// string when it holds its own credential. A locally installed CLI does: it was
+// signed in once, interactively, and there is no key to find. The scheme
+// decides rather than the table, so that a backend named in flags and the same
+// backend named in the table authenticate identically.
+func keyEnvFor(backend base.Backend, spoken dialect.Dialect) string {
+	if base.IsSpawned(backend.Endpoint) {
+		return ""
+	}
+	if backend.KeyEnv != "" {
+		return backend.KeyEnv
+	}
+	return spoken.KeyEnv
 }
 
 // Translate builds the backend request out of the base request and reports
@@ -109,16 +147,26 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 		return result, nil
 	}
 
-	key := os.Getenv(backend.KeyEnv)
-	if key == "" {
-		return result, Fail(ExitUsage, "missing credential: set %s: %w", backend.KeyEnv, ErrMissingCredential)
+	// A backend that names no variable holds its own credential, and there is
+	// nothing to look up or to refuse it for.
+	key := ""
+	if backend.KeyEnv != "" {
+		key = os.Getenv(backend.KeyEnv)
+		if key == "" {
+			return result, Fail(ExitUsage, "missing credential: set %s: %w", backend.KeyEnv, ErrMissingCredential)
+		}
+	}
+
+	reach, err := resolveExecutor(catalog, backend, executor)
+	if err != nil {
+		return result, err
 	}
 
 	wantsEvents := WantsEvents(req, opts)
 	upstream := wantsEvents || spoken.StreamUpstream
 
 	call := Call{
-		URL:     dialect.Endpoint(spoken, backend),
+		URL:     targetOf(spoken, backend),
 		Headers: spoken.Headers(key),
 		Body:    encoded.Body,
 		Stream:  upstream,
@@ -126,7 +174,7 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 
 	// --raw returns the backend's own bytes, so the translated event sequence
 	// is not also written.
-	round, err := exchange(ctx, executor, spoken, call, wantsEvents && !opts.Raw, sink)
+	round, err := exchange(ctx, reach, spoken, call, wantsEvents && !opts.Raw, sink)
 	result.Received = round.Received
 	if err != nil {
 		return result, err
@@ -154,6 +202,31 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 		return result, Fail(ExitBackend, "backend reported an error: %s", errorText(folded))
 	}
 	return result, nil
+}
+
+// resolveExecutor picks how the backend is reached. A supplied executor wins,
+// so that a recorded exchange can be replayed without a network or a
+// subprocess; otherwise the endpoint's scheme selects one from the table.
+func resolveExecutor(catalog Catalog, backend base.Backend, supplied Executor) (Executor, error) {
+	if supplied != nil {
+		return supplied, nil
+	}
+	scheme := base.SchemeOf(backend.Endpoint)
+	chosen, known := catalog.Executors[scheme]
+	if !known {
+		return nil, Fail(ExitUsage, "no executor for endpoint scheme %q in %q", scheme, backend.Endpoint)
+	}
+	return chosen, nil
+}
+
+// targetOf names where the backend is. A path belongs to an HTTP operation and
+// a process is reached by name, so the scheme decides whether the dialect's
+// path is appended to the endpoint.
+func targetOf(spoken dialect.Dialect, backend base.Backend) string {
+	if base.IsSpawned(backend.Endpoint) {
+		return backend.Endpoint
+	}
+	return dialect.Endpoint(spoken, backend)
 }
 
 func errorText(resp base.Response) string {

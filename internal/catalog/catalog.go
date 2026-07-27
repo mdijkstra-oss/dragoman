@@ -19,7 +19,18 @@ import (
 
 // New builds the catalog from the embedded service table.
 func New() core.Catalog {
-	return core.Catalog{Dialects: Dialects(), Presets: Presets()}
+	return core.Catalog{Dialects: Dialects(), Presets: Presets(), Executors: Executors()}
+}
+
+// Executors names how each kind of endpoint is reached. Everything served over
+// HTTP shares one client; a locally installed CLI is spawned instead.
+func Executors() core.Executors {
+	overHTTP := core.NewHTTPExecutor()
+	return core.Executors{
+		"http":          overHTTP,
+		"https":         overHTTP,
+		base.SchemeExec: core.NewClaudeCLIExecutor(),
+	}
 }
 
 // Presets is the shipped service table. A table dragoman ships with cannot be

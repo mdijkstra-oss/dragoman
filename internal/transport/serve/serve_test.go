@@ -218,6 +218,28 @@ func TestStatusMapping(t *testing.T) {
 	}
 }
 
+// TestSelfAuthenticatingServiceIsServed covers the service that names no
+// environment variable. Every other one is refused with a 500 until its key is
+// set, and reusing that check here would make the only backend needing no key
+// the only backend the listener could never reach. The executor is injected, so
+// what is exercised is routing and the credential decision, not a spawn — the
+// protocol is anthropic-messages either way, which is why the recorded exchange
+// is the same one.
+func TestSelfAuthenticatingServiceIsServed(t *testing.T) {
+	backend := catalog.Presets()["claude-cli"]
+	if backend.KeyEnv != "" {
+		t.Fatalf("claude-cli names %q; this test is about a service that names none", backend.KeyEnv)
+	}
+
+	server := listen(t, serve.Config{Executor: fixtures("anthropic")})
+	answered := send(t, server, http.MethodPost, "/responses/claude-cli", requestBody(t, false))
+
+	if answered.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
+	}
+	assertResponseBody(t, answered.body)
+}
+
 // TestServicesDescribesTheTableWithoutCredentials covers what makes a running
 // instance self-describing, and the line it may not cross: a client learns what
 // it can address, never what the process holds.
@@ -329,10 +351,14 @@ func TestStrictRefusesBeforeSending(t *testing.T) {
 }
 
 // listen serves the catalog over a real HTTP server, with a key present for
-// every service so that a test asserts on translation rather than on setup.
+// every service that names a variable, so that a test asserts on translation
+// rather than on setup. A service holding its own credential names none.
 func listen(t *testing.T, cfg serve.Config) *httptest.Server {
 	t.Helper()
 	for _, backend := range catalog.Presets() {
+		if backend.KeyEnv == "" {
+			continue
+		}
 		t.Setenv(backend.KeyEnv, leakSentinel)
 	}
 	cfg.Catalog = catalog.New()

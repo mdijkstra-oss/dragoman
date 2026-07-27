@@ -76,8 +76,10 @@ func resolve(name string, entry service, known map[string]bool, protocols []stri
 	}
 	// The variable is required; its value is not. An instance serving six
 	// providers has to start with the one key its operator holds, so an unset
-	// variable fails when the service is called rather than here.
-	if entry.Auth == "" {
+	// variable fails when the service is called rather than here. A service
+	// dragoman spawns is the exception: it was signed in once, interactively,
+	// and there is no variable to name.
+	if entry.Auth == "" && !base.IsSpawned(entry.Endpoint) {
 		return base.Backend{}, fmt.Errorf("config: service %q has no auth (name the environment variable holding the key)", name)
 	}
 	return base.Backend{

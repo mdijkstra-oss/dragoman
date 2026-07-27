@@ -6,6 +6,7 @@ package anthropicmessages
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/matthijn/dragoman/internal/base"
 	"github.com/matthijn/dragoman/internal/dialect"
@@ -66,12 +67,12 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	}
 	drops = append(drops, dialect.Unread(req, carries)...)
 
-	// This is the one wire format that will not accept a request without a
-	// cap, so it is the one place absent may not stay absent.
-	cap := DefaultMaxTokens
-	if req.MaxOutputTokens != nil {
-		cap = *req.MaxOutputTokens
+	if err := checkTurns(req, backend); err != nil {
+		return dialect.Encoded{}, err
 	}
+
+	cap, capDrops := outputCap(req, backend)
+	drops = append(drops, capDrops...)
 
 	body := wireRequest{Model: base.GetModel(req), MaxTokens: cap, Stream: stream}
 
@@ -82,18 +83,8 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	body.System, body.Messages = system, messages
 	drops = append(drops, itemDrops...)
 
-	tools, toolDrops := dialect.FunctionTools(req.Tools)
-	drops = append(drops, toolDrops...)
-	for _, tool := range tools {
-		body.Tools = append(body.Tools, wireTool{
-			Name:        tool.Name,
-			Description: tool.Description,
-			InputSchema: tool.Parameters,
-			Strict:      tool.Strict,
-		})
-	}
+	drops = append(drops, applyTools(&body, req, backend)...)
 
-	body.ToolChoice = toolChoice(req)
 	if effort := base.GetEffort(req); effort != "" {
 		body.OutputConfig = &wireOutputConfig{Effort: effort}
 	}
@@ -119,6 +110,151 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
 }
 
+// outputCap settles the one field this wire format will not accept a request
+// without, which is why the protocol supplies its own rather than leaving it to
+// a table. The exception is the endpoint with nowhere to put one, where a cap
+// the caller supplied is reported rather than silently ignored.
+func outputCap(req base.Request, backend base.Backend) (*int, []base.Drop) {
+	if backend.NoOutputCap {
+		if req.MaxOutputTokens == nil {
+			return nil, nil
+		}
+		return nil, []base.Drop{cannot(backend, "max_output_tokens", "has no output cap")}
+	}
+	cap := DefaultMaxTokens
+	if req.MaxOutputTokens != nil {
+		cap = *req.MaxOutputTokens
+	}
+	return &cap, nil
+}
+
+// applyTools places the caller's tools, or reports every field that depended on
+// them. A backend that resolves tool calls itself has no channel to hand one
+// back, so a tool sent there produces prose where the caller expected a call —
+// confident, well-formed, and wrong.
+func applyTools(body *wireRequest, req base.Request, backend base.Backend) []base.Drop {
+	if backend.NoTools {
+		return toolless(req, backend)
+	}
+	tools, drops := dialect.FunctionTools(req.Tools)
+	for _, tool := range tools {
+		body.Tools = append(body.Tools, wireTool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.Parameters,
+			Strict:      tool.Strict,
+		})
+	}
+	body.ToolChoice = toolChoice(req)
+	return drops
+}
+
+// toolless reports each field the caller set that only tools could have served.
+// Tool calls and results already in the input are untouched: replaying a
+// history costs the backend nothing, and only a fresh call is impossible.
+func toolless(req base.Request, backend base.Backend) []base.Drop {
+	drops := []base.Drop{}
+	for index := range req.Tools {
+		drops = append(drops, cannot(backend,
+			dialect.IndexedPath("tools", index), "resolves its own tools and cannot return a call to the caller"))
+	}
+	if req.ToolChoice != nil {
+		drops = append(drops, cannot(backend, "tool_choice", "has no tools to choose between"))
+	}
+	if req.ParallelToolCalls != nil {
+		drops = append(drops, cannot(backend, "parallel_tool_calls", "has no tools to run in parallel"))
+	}
+	return drops
+}
+
+// checkTurns refuses a history a one-turn backend would misread. Dropping a
+// user message would change the conversation and sending it would run an extra
+// turn whose answer the caller never asked for, so neither is a drop.
+func checkTurns(req base.Request, backend base.Backend) error {
+	if !backend.OneTurnPerRequest {
+		return nil
+	}
+	starts := userTurnStarts(req.Input)
+	if len(starts) <= 1 {
+		return nil
+	}
+	paths := make([]string, 0, len(starts))
+	for _, index := range starts {
+		paths = append(paths, dialect.IndexedPath("input", index))
+	}
+	return fmt.Errorf("%s executes one turn per request; input has %d user turns, at %s",
+		backend.Name, len(starts), strings.Join(paths, ", "))
+}
+
+// userTurnStarts reports the input index that opens each user turn, after
+// consecutive items on the same side have collapsed into one message. The
+// encoder groups by the same rule, so the count is the number of turns the
+// backend would actually run.
+func userTurnStarts(items []base.Item) []int {
+	starts := []int{}
+	previous := ""
+	for index, item := range items {
+		role := turnRole(item)
+		if role == "" {
+			continue
+		}
+		if role == base.RoleUser && previous != base.RoleUser {
+			starts = append(starts, index)
+		}
+		previous = role
+	}
+	return starts
+}
+
+// turnRole reports which side of the conversation an input item joins, or the
+// empty string when it feeds the system prompt or carries nothing to send.
+// Turn membership is decided in one place so that what the encoder groups and
+// what the turn check counts can never disagree.
+func turnRole(item base.Item) string {
+	decide, moved := turnRoles[item.Type]
+	if !moved {
+		return ""
+	}
+	return decide(item)
+}
+
+var turnRoles = map[base.ItemType]func(base.Item) string{
+	base.ItemMessage:            messageTurn,
+	base.ItemReasoning:          reasoningTurn,
+	base.ItemFunctionCall:       assistantTurn,
+	base.ItemFunctionCallOutput: userTurn,
+}
+
+func messageTurn(item base.Item) string {
+	if item.Role == base.RoleSystem || item.Role == base.RoleDeveloper {
+		return ""
+	}
+	if item.Role == base.RoleAssistant {
+		return base.RoleAssistant
+	}
+	return base.RoleUser
+}
+
+// reasoningTurn joins the assistant side only when the item still carries the
+// state the backend wants back; a summary alone is not sent at all.
+func reasoningTurn(item base.Item) string {
+	if item.EncryptedContent == "" {
+		return ""
+	}
+	return base.RoleAssistant
+}
+
+func assistantTurn(base.Item) string { return base.RoleAssistant }
+
+func userTurn(base.Item) string { return base.RoleUser }
+
+// cannot reports a field this particular endpoint can never carry. The reason
+// is unsupported rather than unimplemented because no amount of work in
+// dragoman would add the capability.
+func cannot(backend base.Backend, path, detail string) base.Drop {
+	return base.Drop{Path: path, Reason: base.DropUnsupported, Detail: backend.Name + " " + detail}
+}
+
 // buildMessages groups the base's flat item list into this dialect's turns. A
 // tool result must sit in the user message that immediately follows the
 // assistant message holding its call, so consecutive items of the same side
@@ -141,13 +277,10 @@ func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error)
 	drops, err := dialect.WalkItems(req.Input, dialect.Handlers{
 		Message: func(item base.Item) {
 			text := base.GetText(item)
-			if item.Role == base.RoleSystem || item.Role == base.RoleDeveloper {
+			role := turnRole(item)
+			if role == "" {
 				system = dialect.JoinText(system, text)
 				return
-			}
-			role := base.RoleUser
-			if item.Role == base.RoleAssistant {
-				role = base.RoleAssistant
 			}
 			appendBlock(role, wireBlock{Type: "text", Text: text})
 		},
@@ -155,7 +288,7 @@ func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error)
 			// Whatever the backend returned as state goes back unaltered and
 			// in position: the signature is byte-identical or the request is
 			// rejected.
-			if item.EncryptedContent == "" {
+			if turnRole(item) == "" {
 				return
 			}
 			appendBlock(base.RoleAssistant, wireBlock{
@@ -409,8 +542,13 @@ func blockDrops(raw json.RawMessage, block wireBlock, index int) []base.Drop {
 }
 
 type wireRequest struct {
-	Model        string            `json:"model,omitempty"`
-	MaxTokens    int               `json:"max_tokens"`
+	Model string `json:"model,omitempty"`
+
+	// MaxTokens is a pointer because one endpoint serving this shape requires
+	// it and another has nowhere to put it. Zero is not a cap either backend
+	// would accept, so absent has to be spelled as absent.
+	MaxTokens *int `json:"max_tokens,omitempty"`
+
 	System       string            `json:"system,omitempty"`
 	Messages     []wireMessage     `json:"messages"`
 	Tools        []wireTool        `json:"tools,omitempty"`
