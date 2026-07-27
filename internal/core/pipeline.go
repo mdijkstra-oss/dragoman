@@ -187,6 +187,7 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 	if err != nil {
 		return result, Fail(ExitUsage, "%s", err)
 	}
+	folded = base.AsFormattedText(folded, req)
 	result.Drops = base.MergeDrops(result.Drops, base.Classify(round.Drops, spoken.DropTable))
 	if opts.Strict && len(result.Drops) > 0 {
 		return result, Fail(ExitUsage, "strict: %d field(s) dropped:\n%s",

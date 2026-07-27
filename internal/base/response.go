@@ -25,6 +25,68 @@ type Response struct {
 	Raw json.RawMessage `json:"-"`
 }
 
+// AsFormattedText moves an answer the backend delivered as a tool call into the
+// output text the caller's format asked for. A caller that sets text.format asked
+// for a shape, not for a tool, and every client reads the reply out of the output
+// text — so a backend that reaches the shape by calling a tool of its own has
+// answered the question in a place nobody is listening.
+//
+// The claude CLI is the backend that does this: --json-schema is implemented as a
+// forced call to a StructuredOutput tool, which arrives as a tool_use block and
+// decodes into a function_call item.
+//
+// It applies only when the caller offered no tools. With tools on the request a
+// function_call may be a genuine one meant for the caller to run, and no rule
+// distinguishes the two from outside; with none, a tool call can only be the
+// backend's own machinery for the format.
+func AsFormattedText(resp Response, req Request) Response {
+	answering, isAnswered := findFormatAnswer(resp, req)
+	if !isAnswered {
+		return resp
+	}
+	converted := resp
+	converted.Output = make([]Item, 0, len(resp.Output))
+	for index, item := range resp.Output {
+		if index == answering {
+			item = Item{
+				Type:    ItemMessage,
+				ID:      item.ID,
+				Status:  item.Status,
+				Role:    RoleAssistant,
+				Content: []ContentPart{{Type: PartOutputText, Text: item.Arguments}},
+			}
+		}
+		converted.Output = append(converted.Output, item)
+	}
+	return converted
+}
+
+// findFormatAnswer reports which item carries the answer to the caller's format.
+//
+// It is the last tool call rather than the first, and rather than all of them. The
+// claude CLI checks its own structured answer against the schema and resamples one
+// that fails, leaving every attempt in the stream — a rejected draft arrives as a
+// tool call carrying unsubstituted $PARAMETER_NAME placeholders, followed by the
+// one that survived. Converting them all would concatenate a draft and an answer
+// into two JSON values in one output text, which parses as neither.
+//
+// The drafts are left as tool calls rather than dropped: they carry no output text,
+// so nothing reading the reply sees them, and discarding what a backend sent is not
+// this function's business.
+func findFormatAnswer(resp Response, req Request) (int, bool) {
+	format := GetFormat(req)
+	if format == nil || format.Type != "json_schema" || len(req.Tools) > 0 {
+		return 0, false
+	}
+	answering, isFound := 0, false
+	for index, item := range resp.Output {
+		if item.Type == ItemFunctionCall && item.Arguments != "" {
+			answering, isFound = index, true
+		}
+	}
+	return answering, isFound
+}
+
 // Usage is whatever the backend reported that has an obvious home. Nothing is
 // computed, converted, or costed — but the base defines what each field means,
 // and the providers disagree about that. Responses counts reasoning inside

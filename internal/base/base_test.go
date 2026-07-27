@@ -269,3 +269,98 @@ func sameJSON(t *testing.T, left, right []byte) bool {
 	}
 	return reflect.DeepEqual(a, b)
 }
+
+// TestAsFormattedText covers the shape the claude CLI answers a json_schema
+// format in: --json-schema is a forced call to a StructuredOutput tool, so the
+// answer arrives as a function_call and every client reading output text finds
+// nothing at all.
+func TestAsFormattedText(t *testing.T) {
+	schema := Request{Text: &TextConfig{Format: &Format{Type: "json_schema", Name: "answer"}}}
+	withTools := Request{
+		Text:  &TextConfig{Format: &Format{Type: "json_schema", Name: "answer"}},
+		Tools: []Tool{{Name: "get_weather"}},
+	}
+	toolCall := Item{
+		Type: ItemFunctionCall, ID: "fc_1", Status: "completed",
+		CallID: "toolu_1", Name: "StructuredOutput", Arguments: `{"names":["TestAlpha"]}`,
+	}
+
+	cases := []struct {
+		name string
+		req  Request
+		out  []Item
+		want []Item
+	}{
+		{
+			name: "a tool call answering a format becomes the output text",
+			req:  schema,
+			out:  []Item{toolCall},
+			want: []Item{{
+				Type: ItemMessage, ID: "fc_1", Status: "completed", Role: RoleAssistant,
+				Content: []ContentPart{{Type: PartOutputText, Text: `{"names":["TestAlpha"]}`}},
+			}},
+		},
+		{
+			name: "reasoning beside it is left alone",
+			req:  schema,
+			out:  []Item{{Type: ItemReasoning, ID: "rs_0", EncryptedContent: "blob"}, toolCall},
+			want: []Item{{Type: ItemReasoning, ID: "rs_0", EncryptedContent: "blob"}, {
+				Type: ItemMessage, ID: "fc_1", Status: "completed", Role: RoleAssistant,
+				Content: []ContentPart{{Type: PartOutputText, Text: `{"names":["TestAlpha"]}`}},
+			}},
+		},
+		{
+			// The CLI resamples a structured answer that failed its own schema
+			// check; the rejected draft carries $PARAMETER_NAME placeholders and
+			// is still in the stream ahead of the answer that survived.
+			name: "only the surviving attempt becomes the output text",
+			req:  schema,
+			out: []Item{
+				{Type: ItemFunctionCall, ID: "fc_1", Name: "StructuredOutput",
+					Arguments: `{"$PARAMETER_NAME":"a_key"}`},
+				toolCall,
+			},
+			want: []Item{
+				{Type: ItemFunctionCall, ID: "fc_1", Name: "StructuredOutput",
+					Arguments: `{"$PARAMETER_NAME":"a_key"}`},
+				{Type: ItemMessage, ID: "fc_1", Status: "completed", Role: RoleAssistant,
+					Content: []ContentPart{{Type: PartOutputText, Text: `{"names":["TestAlpha"]}`}}},
+			},
+		},
+		{
+			name: "a call the caller can run is left alone, because a tool was offered",
+			req:  withTools,
+			out:  []Item{toolCall},
+			want: []Item{toolCall},
+		},
+		{
+			name: "a backend that already answered in text is untouched",
+			req:  schema,
+			out: []Item{{Type: ItemMessage, Role: RoleAssistant,
+				Content: []ContentPart{{Type: PartOutputText, Text: `{"names":[]}`}}}},
+			want: []Item{{Type: ItemMessage, Role: RoleAssistant,
+				Content: []ContentPart{{Type: PartOutputText, Text: `{"names":[]}`}}}},
+		},
+		{
+			name: "a request that asked for no format is untouched",
+			req:  Request{},
+			out:  []Item{toolCall},
+			want: []Item{toolCall},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			given := Response{Status: "completed", Output: testCase.out}
+
+			got := AsFormattedText(given, testCase.req)
+
+			if !reflect.DeepEqual(got.Output, testCase.want) {
+				t.Errorf("output =\n%+v\nwant\n%+v", got.Output, testCase.want)
+			}
+			if !reflect.DeepEqual(given.Output, testCase.out) {
+				t.Errorf("the response it was given was mutated: %+v", given.Output)
+			}
+		})
+	}
+}
