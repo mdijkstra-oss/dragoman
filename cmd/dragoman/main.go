@@ -35,6 +35,7 @@ type CLI struct {
 	NoExecute bool  `help:"Translate and print the request; make no call." name:"no-execute"`
 	Raw       bool  `help:"Return the backend's untranslated response."`
 	Verbose   bool  `help:"Write the translation and its dropped fields to stderr." short:"v"`
+	Timing    bool  `help:"Write the elapsed time to stderr."`
 
 	File   string `help:"Read the request from a file instead of stdin." short:"f" type:"path"`
 	Output string `help:"Write the result to a file instead of stdout." short:"o" type:"path"`
@@ -91,7 +92,8 @@ func run() int {
 
 	streams := pipe.Streams{In: input, Out: buffered, Err: os.Stderr}
 	executor := core.NewHTTPExecutor()
-	return pipe.Run(context.Background(), catalog.New(), options, streams, executor, cli.Verbose)
+	return pipe.Run(context.Background(), catalog.New(), options, streams, executor,
+		pipe.Report{Verbose: cli.Verbose, Timing: cli.Timing})
 }
 
 // parse runs kong and converts its exit into dragoman's own, so that a bad

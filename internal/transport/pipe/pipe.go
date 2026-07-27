@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/matthijn/dragoman/internal/base"
 	"github.com/matthijn/dragoman/internal/core"
@@ -27,19 +28,40 @@ type Streams struct {
 // the mode, so this is a correctness requirement, not a performance note.
 type Flusher interface{ Flush() error }
 
+// Report is what the caller asked to see beside the answer. Diagnostics go to
+// stderr so that stdout stays the response a client can parse.
+type Report struct {
+	Verbose bool
+	Timing  bool
+}
+
 // Run performs one translation and writes its result. It returns the exit
 // code: zero when a response was returned and translated, one when the backend
 // said no, and two when dragoman could not run.
-func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams Streams, executor core.Executor, verbose bool) int {
+func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams Streams, executor core.Executor, report Report) int {
 	body, err := io.ReadAll(streams.In)
 	if err != nil {
-		return report(streams.Err, core.Fail(core.ExitUsage, "reading input: %s", err))
+		return fail(streams.Err, core.Fail(core.ExitUsage, "reading input: %s", err))
 	}
 
-	sink := func(event base.Event) error { return writeEvent(streams.Out, event) }
+	// Wall time is the transport's to measure: it owns the invocation, and the
+	// core stays free of a clock so that translation is a function from data
+	// to data.
+	started := time.Now()
+	firstEvent := time.Duration(0)
+	sink := func(event base.Event) error {
+		if firstEvent == 0 {
+			firstEvent = time.Since(started)
+		}
+		return writeEvent(streams.Out, event)
+	}
 	result, runErr := core.Run(ctx, catalog, opts, body, executor, sink)
+	elapsed := time.Since(started)
 
-	if verbose {
+	if report.Timing {
+		writeTiming(streams.Err, elapsed, firstEvent)
+	}
+	if report.Verbose {
 		writeVerbose(streams.Err, result)
 	}
 	// Drops are returned as data; the transport decides they go to stderr.
@@ -47,7 +69,7 @@ func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams S
 		fmt.Fprintln(streams.Err, base.FormatDrops(result.Drops))
 	}
 	if runErr != nil {
-		return report(streams.Err, runErr)
+		return fail(streams.Err, runErr)
 	}
 
 	switch {
@@ -58,7 +80,7 @@ func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams S
 	case result.Response != nil:
 		encoded, err := json.Marshal(result.Response)
 		if err != nil {
-			return report(streams.Err, core.Fail(core.ExitUsage, "encoding response: %s", err))
+			return fail(streams.Err, core.Fail(core.ExitUsage, "encoding response: %s", err))
 		}
 		return writeBody(streams, encoded)
 	}
@@ -103,13 +125,26 @@ func writeBody(streams Streams, body []byte) int {
 		return int(core.ExitOK)
 	}
 	if _, err := streams.Out.Write(append(body, '\n')); err != nil {
-		return report(streams.Err, core.Fail(core.ExitUsage, "writing output: %s", err))
+		return fail(streams.Err, core.Fail(core.ExitUsage, "writing output: %s", err))
 	}
 	if flusher, can := streams.Out.(Flusher); can {
 		_ = flusher.Flush()
 	}
 	return int(core.ExitOK)
 }
+
+// writeTiming reports how long the round trip took. Time to the first event is
+// the number that separates two models on the same prompt; total elapsed is
+// the one that separates two backends.
+func writeTiming(err io.Writer, elapsed, firstEvent time.Duration) {
+	if firstEvent > 0 {
+		fmt.Fprintf(err, "elapsed %s, first event %s\n", round(elapsed), round(firstEvent))
+		return
+	}
+	fmt.Fprintf(err, "elapsed %s\n", round(elapsed))
+}
+
+func round(d time.Duration) time.Duration { return d.Round(time.Millisecond) }
 
 func writeVerbose(err io.Writer, result core.Result) {
 	if len(result.Sent) > 0 {
@@ -120,7 +155,7 @@ func writeVerbose(err io.Writer, result core.Result) {
 	}
 }
 
-func report(err io.Writer, failure error) int {
+func fail(err io.Writer, failure error) int {
 	fmt.Fprintf(err, "dragoman: %s\n", failure)
 	return int(core.CodeOf(failure))
 }

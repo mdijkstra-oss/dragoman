@@ -57,7 +57,7 @@ func run(t *testing.T, opts core.Options, body []byte) (string, string, int) {
 	out, errs := &bytes.Buffer{}, &bytes.Buffer{}
 	streams := pipe.Streams{In: bytes.NewReader(body), Out: out, Err: errs}
 	executor := recorded{dir: filepath.Join("..", "..", "..", "testdata", "fixtures", opts.Preset)}
-	code := pipe.Run(context.Background(), catalog.New(), opts, streams, executor, false)
+	code := pipe.Run(context.Background(), catalog.New(), opts, streams, executor, pipe.Report{})
 	return out.String(), errs.String(), code
 }
 
@@ -184,7 +184,7 @@ func TestMissingCredentialIsAUsageFailure(t *testing.T) {
 	out, errs := &bytes.Buffer{}, &bytes.Buffer{}
 	streams := pipe.Streams{In: bytes.NewReader(request(t, false)), Out: out, Err: errs}
 	code := pipe.Run(context.Background(), catalog.New(), core.Options{Preset: "anthropic"},
-		streams, recorded{}, false)
+		streams, recorded{}, pipe.Report{})
 	if code != int(core.ExitUsage) {
 		t.Errorf("exit = %d, want %d", code, core.ExitUsage)
 	}
