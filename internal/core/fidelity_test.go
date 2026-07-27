@@ -270,3 +270,36 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(encoded)
 }
+
+// TestUsageMeansTheSameThingEverywhere covers the one output shape having one
+// counting method. Responses counts reasoning inside output_tokens and names
+// the subset in the details; a backend that reports the two as siblings is
+// assembled into that shape, or a caller doing arithmetic on the same field
+// gets a different answer per backend.
+func TestUsageMeansTheSameThingEverywhere(t *testing.T) {
+	for _, preset := range backends {
+		for _, streamed := range []bool{false, true} {
+			mode := "buffered"
+			if streamed {
+				mode = "streamed"
+			}
+			t.Run(preset+"/"+mode, func(t *testing.T) {
+				usage := decode(t, preset, streamed).Usage
+				if usage == nil {
+					t.Fatal("no usage reported")
+				}
+				if usage.InputTokens+usage.OutputTokens != usage.TotalTokens {
+					t.Errorf("input %d + output %d != total %d",
+						usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
+				}
+				if usage.OutputTokenDetails == nil {
+					return
+				}
+				if reasoning := usage.OutputTokenDetails.ReasoningTokens; reasoning > usage.OutputTokens {
+					t.Errorf("reasoning %d exceeds output %d; it is a subset, not a sibling",
+						reasoning, usage.OutputTokens)
+				}
+			})
+		}
+	}
+}

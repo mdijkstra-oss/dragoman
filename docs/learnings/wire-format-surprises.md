@@ -157,3 +157,50 @@ else is provider-specific: `none` (OpenAI only), `minimal` (Gemini and
 This is not a mapping table — dragoman passes values through byte for byte. It is
 the safe value set for a test matrix where one unmodified request goes to every
 backend.
+
+## Usage: one output shape means one counting method
+
+The four providers report token usage in three different *meanings*, not just
+three different spellings, and the difference is invisible because they all use
+a field called "output tokens".
+
+| provider | reasoning tokens are | field |
+|---|---|---|
+| `openai-responses` | **inside** `output_tokens` | `output_tokens_details.reasoning_tokens` |
+| `anthropic-messages` | **inside** `output_tokens` | `output_tokens_details.thinking_tokens` |
+| `openai-completions` | **inside** `completion_tokens` | `completion_tokens_details.reasoning_tokens` |
+| `gemini-interactions` | **beside** `total_output_tokens` | `total_thought_tokens` |
+
+Captured live for one identical request, before this was mapped:
+
+```
+gemini     total_output_tokens 25    total_thought_tokens 90     ← siblings
+anthropic  output_tokens 158         thinking_tokens 34          ← subset
+deepseek   completion_tokens 112     reasoning_tokens 25         ← subset
+```
+
+Forwarding those numbers unchanged makes `usage.output_tokens` mean "the answer"
+on one backend and "the answer plus the reasoning" on three others — a caller
+comparing models or estimating cost reads 25 against 160 and concludes a 6×
+difference that does not exist. The real figures are 115 and 158.
+
+This is not a value dragoman should pass through. The base **is**
+`openai-responses`, and Responses defines the arithmetic: `output_tokens`
+includes reasoning, `output_tokens_details.reasoning_tokens` names the subset,
+and `total_tokens` is the two sides added. Assembling Gemini's two siblings into
+that shape is the same structural mapping as relocating the reasoning level —
+the meaning is the base's, not one dragoman invented.
+
+`TestUsageMeansTheSameThingEverywhere` asserts the arithmetic holds for every
+backend on both paths: `input + output == total`, and `reasoning <= output`.
+
+Two figures that are real and remain after the fix, for the same request:
+
+- **Input differs 5×** — 104 (Gemini) vs 329 (DeepSeek) vs 516 (Anthropic).
+  Almost none of that is the tokenizer: the bare prompt costs 22 / 23 / 37. It
+  is the tool-use scaffolding each provider adds server-side, which costs 82 /
+  306 / 479 for the same one-function schema. dragoman sends the same tool to
+  all three; `--no-execute` shows the bodies.
+- **DeepSeek served 256 of its 329 input tokens from cache** on that run, so its
+  input is not priced the way the raw count suggests either. That is now
+  reported as `input_tokens_details.cached_tokens`.

@@ -25,11 +25,47 @@ type Response struct {
 }
 
 // Usage is whatever the backend reported that has an obvious home. Nothing is
-// computed, converted, or costed.
+// computed, converted, or costed — but the base defines what each field means,
+// and the providers disagree about that. Responses counts reasoning inside
+// OutputTokens and names the subset in the details, so a backend that reports
+// the two separately is assembled into that shape rather than left meaning
+// something else under the same key.
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int           `json:"input_tokens"`
+	InputTokenDetails  *InputDetails `json:"input_tokens_details,omitempty"`
+	OutputTokens       int           `json:"output_tokens"`
+	OutputTokenDetails *OutputDetail `json:"output_tokens_details,omitempty"`
+	TotalTokens        int           `json:"total_tokens"`
+}
+
+// InputDetails names the part of the input the provider did not have to read
+// again.
+type InputDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// OutputDetail names the part of the output that was reasoning. It is a subset
+// of OutputTokens, never a sibling of it.
+type OutputDetail struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// CountUsage assembles a usage record in the base's shape. Reasoning is
+// counted inside the output, and the total is the two sides added, so a caller
+// can do arithmetic on these fields whichever backend answered.
+func CountUsage(input, output, reasoning, cached int) *Usage {
+	usage := &Usage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  input + output,
+	}
+	if cached > 0 {
+		usage.InputTokenDetails = &InputDetails{CachedTokens: cached}
+	}
+	if reasoning > 0 {
+		usage.OutputTokenDetails = &OutputDetail{ReasoningTokens: reasoning}
+	}
+	return usage
 }
 
 // IncompleteDetails names why a response stopped short.

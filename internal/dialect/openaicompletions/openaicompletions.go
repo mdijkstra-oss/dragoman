@@ -390,11 +390,9 @@ var finishReasons = map[string]string{
 }
 
 func usagePiece(usage *wireUsage) base.Piece {
-	return base.UsagePiece(&base.Usage{
-		InputTokens:  usage.PromptTokens,
-		OutputTokens: usage.CompletionTokens,
-		TotalTokens:  usage.TotalTokens,
-	})
+	return base.UsagePiece(base.CountUsage(
+		usage.PromptTokens, usage.CompletionTokens,
+		usage.CompletionDetails.ReasoningTokens, usage.PromptDetails.CachedTokens))
 }
 
 func callKey(index int) string { return callPrefix + strconv.Itoa(index) }
@@ -529,7 +527,13 @@ type wireDelta struct {
 }
 
 type wireUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens  int `json:"prompt_tokens"`
+	PromptDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CompletionTokens  int `json:"completion_tokens"`
+	CompletionDetails struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+	TotalTokens int `json:"total_tokens"`
 }

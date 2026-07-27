@@ -399,12 +399,14 @@ func deltaPieces(index int, delta wireDelta) []base.Piece {
 // expects distinct terminal event names is wrong.
 func outcomePieces(interaction wireInteraction) []base.Piece {
 	pieces := []base.Piece{}
-	if interaction.Usage != nil {
-		pieces = append(pieces, base.UsagePiece(&base.Usage{
-			InputTokens:  interaction.Usage.TotalInputTokens,
-			OutputTokens: interaction.Usage.TotalOutputTokens,
-			TotalTokens:  interaction.Usage.TotalTokens,
-		}))
+	if usage := interaction.Usage; usage != nil {
+		// The answer and the thinking arrive as siblings here; Responses counts
+		// the thinking inside the output, so they are added.
+		pieces = append(pieces, base.UsagePiece(base.CountUsage(
+			usage.TotalInputTokens,
+			usage.TotalOutputTokens+usage.TotalThoughtTokens,
+			usage.TotalThoughtTokens,
+			usage.TotalCachedTokens)))
 	}
 	return append(pieces, dialect.Outcome(interaction.Status, terminalStatuses))
 }
@@ -507,9 +509,11 @@ func (i *wireInteraction) UnmarshalJSON(data []byte) error {
 }
 
 type wireUsage struct {
-	TotalTokens       int `json:"total_tokens"`
-	TotalInputTokens  int `json:"total_input_tokens"`
-	TotalOutputTokens int `json:"total_output_tokens"`
+	TotalTokens        int `json:"total_tokens"`
+	TotalInputTokens   int `json:"total_input_tokens"`
+	TotalOutputTokens  int `json:"total_output_tokens"`
+	TotalThoughtTokens int `json:"total_thought_tokens"`
+	TotalCachedTokens  int `json:"total_cached_tokens"`
 }
 
 type wireEvent struct {

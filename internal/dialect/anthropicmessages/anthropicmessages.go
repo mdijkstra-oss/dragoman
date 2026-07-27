@@ -199,7 +199,8 @@ func toolChoice(req base.Request) *wireToolChoice {
 // at message_start, which the terminal frame has to be combined with because
 // the two halves of usage arrive on different frames.
 type decodeState struct {
-	InputTokens int
+	InputTokens  int
+	CachedTokens int
 }
 
 func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.Recognised, error) {
@@ -229,8 +230,9 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 			return current, dialect.Recognised{}, nil
 		}
 		next := current
-		if event.Message.Usage != nil {
-			next.InputTokens = event.Message.Usage.InputTokens
+		if usage := event.Message.Usage; usage != nil {
+			next.InputTokens = usage.InputTokens
+			next.CachedTokens = usage.CacheReadInputTokens
 		}
 		return next, dialect.Recognised{
 			Pieces: []base.Piece{base.Start(event.Message.ID, event.Message.Model, 0)},
@@ -260,12 +262,10 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 
 	case "message_delta":
 		pieces := []base.Piece{}
-		if event.Usage != nil {
-			pieces = append(pieces, base.UsagePiece(&base.Usage{
-				InputTokens:  current.InputTokens,
-				OutputTokens: event.Usage.OutputTokens,
-				TotalTokens:  current.InputTokens + event.Usage.OutputTokens,
-			}))
+		if usage := event.Usage; usage != nil {
+			pieces = append(pieces, base.UsagePiece(base.CountUsage(
+				current.InputTokens, usage.OutputTokens,
+				usage.Details.ThinkingTokens, current.CachedTokens)))
 		}
 		if event.Delta != nil {
 			pieces = append(pieces, dialect.Outcome(event.Delta.StopReason, stopReasons))
@@ -299,12 +299,10 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 		pieces = append(pieces, contentPieces(index, block)...)
 		pieces = append(pieces, base.ClosePiece(dialect.Key(index)))
 	}
-	if message.Usage != nil {
-		pieces = append(pieces, base.UsagePiece(&base.Usage{
-			InputTokens:  message.Usage.InputTokens,
-			OutputTokens: message.Usage.OutputTokens,
-			TotalTokens:  message.Usage.InputTokens + message.Usage.OutputTokens,
-		}))
+	if usage := message.Usage; usage != nil {
+		pieces = append(pieces, base.UsagePiece(base.CountUsage(
+			usage.InputTokens, usage.OutputTokens,
+			usage.Details.ThinkingTokens, usage.CacheReadInputTokens)))
 	}
 	pieces = append(pieces, dialect.Outcome(message.StopReason, stopReasons))
 
@@ -529,8 +527,12 @@ func (m *wireMessageResponse) UnmarshalJSON(data []byte) error {
 }
 
 type wireUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens          int `json:"input_tokens"`
+	OutputTokens         int `json:"output_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+	Details              struct {
+		ThinkingTokens int `json:"thinking_tokens"`
+	} `json:"output_tokens_details"`
 }
 
 type wireEvent struct {
