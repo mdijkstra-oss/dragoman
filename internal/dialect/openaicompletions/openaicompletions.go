@@ -14,13 +14,13 @@ import (
 	"github.com/matthijn/dragoman/internal/dialect"
 )
 
-// Name is the dialect's value on the command line.
+// Name is the wire format most endpoints of this shape serve.
 const Name = "openai-completions"
 
-// DefaultMaxTokensField is the cap field name most endpoints of this shape
-// read. OpenAI's own endpoint wants max_completion_tokens instead, which is a
-// quirks-record entry rather than a second dialect.
-const DefaultMaxTokensField = "max_tokens"
+// ChatName is the same shape as OpenAI's own endpoint serves it. Two endpoints
+// that disagree about a field's name are two wire formats, and naming them
+// alike is what would force a config file to relocate the field for them.
+const ChatName = "openai-chat-completions"
 
 // Keys under which the decoder tracks the items it infers.
 const (
@@ -29,9 +29,32 @@ const (
 	callPrefix   = "call:"
 )
 
+// variant is the whole of what the two formats disagree about. Everything else
+// — the encoder, both decoders, the drop table — is shared, because copying
+// them to change a field name is the N×M mistake this design exists to avoid.
+type variant struct {
+	name        string
+	capField    string
+	streamUsage bool
+}
+
 func Dialect() dialect.Dialect {
+	return build(variant{name: Name, capField: "max_tokens"})
+}
+
+func ChatDialect() dialect.Dialect {
+	return build(variant{
+		name:     ChatName,
+		capField: "max_completion_tokens",
+		// Usage while streaming has to be asked for here, and arrives unasked
+		// everywhere else serving this shape.
+		streamUsage: true,
+	})
+}
+
+func build(spoken variant) dialect.Dialect {
 	return dialect.Dialect{
-		Name:   Name,
+		Name:   spoken.name,
 		Path:   "/chat/completions",
 		KeyEnv: "OPENAI_API_KEY",
 		Headers: func(key string) map[string]string {
@@ -40,7 +63,9 @@ func Dialect() dialect.Dialect {
 				"Content-Type":  "application/json",
 			}
 		},
-		Encode:       encode,
+		Encode: func(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
+			return encode(spoken, req, backend, stream)
+		},
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
@@ -54,16 +79,16 @@ var carries = dialect.Carries{
 	"parallel_tool_calls",
 }
 
-func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
+func encode(spoken variant, req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
 	drops, err := base.Unmodelled(req.Raw, req)
 	if err != nil {
-		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.Encoded{}, fmt.Errorf("%s: %w", spoken.name, err)
 	}
 	drops = append(drops, dialect.Unread(req, carries)...)
 
 	messages, itemDrops, err := buildMessages(req)
 	if err != nil {
-		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.Encoded{}, fmt.Errorf("%s: %w", spoken.name, err)
 	}
 	drops = append(drops, itemDrops...)
 
@@ -71,11 +96,11 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	if model := base.GetModel(req); model != "" {
 		body["model"] = model
 	}
-	if stream && backend.Quirks.StreamUsageOption {
+	if stream && spoken.streamUsage {
 		body["stream_options"] = map[string]any{"include_usage": true}
 	}
-	if cap, _ := base.WithMaxTokens(backend.Quirks, req.MaxOutputTokens); cap != nil {
-		body[capField(backend)] = *cap
+	if cap := req.MaxOutputTokens; cap != nil {
+		body[spoken.capField] = *cap
 	}
 	if effort := base.GetEffort(req); effort != "" {
 		body["reasoning_effort"] = effort
@@ -94,10 +119,11 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	}
 
 	if format := base.GetFormat(req); format != nil && format.Type == "json_schema" {
-		if backend.Quirks.NoStructuredSchema {
+		if backend.NoSchema {
 			// dragoman does not write prompts, so the documented workaround of
-			// naming the shape in the message is not available. The caller
-			// gets prose, and is told.
+			// naming the shape in the message is not available. Dropping beats
+			// forwarding: prose reads as a model quirk the caller adapts to,
+			// where a refusal dragoman provoked reads as dragoman being broken.
 			drops = append(drops, base.Drop{
 				Path:   "text.format",
 				Reason: base.DropUnsupported,
@@ -117,16 +143,9 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", Name, err)
+		return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", spoken.name, err)
 	}
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
-}
-
-func capField(backend base.Backend) string {
-	if backend.Quirks.MaxTokensField != "" {
-		return backend.Quirks.MaxTokensField
-	}
-	return DefaultMaxTokensField
 }
 
 // buildMessages flattens the base's item list into the role-tagged messages

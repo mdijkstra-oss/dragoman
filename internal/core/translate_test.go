@@ -326,10 +326,11 @@ func TestPresetsAreExpressibleInFlags(t *testing.T) {
 	body := weatherRequest(t)
 	for _, preset := range catalog.PresetNames() {
 		backend := catalog.Presets()[preset]
-		// A preset with a quirks record carries per-backend facts that flags
-		// deliberately do not restate; only an empty record must be reachable
-		// from the command line unchanged.
-		if backend.Quirks != (base.Quirks{}) {
+		// no_schema is a capability of an endpoint, and the only entry in the
+		// table that no flag restates. Everything else — including the output
+		// cap and the upstream streaming decision, which the protocol now owns
+		// — must be reachable from the command line unchanged.
+		if backend.NoSchema {
 			continue
 		}
 		t.Run(preset, func(t *testing.T) {
@@ -345,25 +346,19 @@ func TestPresetsAreExpressibleInFlags(t *testing.T) {
 	}
 }
 
-// TestRequiredFieldWithNoSourceFails covers the branch the preset table keeps
-// unreachable: a backend that requires a field with no flag, no body value and
-// no fallback. It exists so the next such field is a table entry rather than a
-// discovery.
-func TestRequiredFieldWithNoSourceFails(t *testing.T) {
+// TestRequiredCapTravelsWithTheProtocol covers what owning placement buys: the
+// one wire format that will not accept a request without an output cap supplies
+// its own, so selecting it by flags and selecting it by name cannot disagree. A
+// service table that had to restate the cap would be a config file deciding a
+// structural question, and an endpoint reached by flags would 400.
+func TestRequiredCapTravelsWithTheProtocol(t *testing.T) {
 	body := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`)
-	_, err := core.Run(context.Background(), catalog.New(), core.Options{
+	sent, _ := translate(t, core.Options{
 		BackendProtocol: "anthropic-messages",
 		Endpoint:        "https://api.anthropic.com/v1",
-		NoExecute:       true,
-	}, body, nil, nil)
-	if err == nil {
-		t.Fatal("want a failure naming the field")
-	}
-	if core.CodeOf(err) != core.ExitUsage {
-		t.Errorf("exit = %d, want %d", core.CodeOf(err), core.ExitUsage)
-	}
-	if !strings.Contains(err.Error(), "max_tokens") {
-		t.Errorf("error does not name the field: %v", err)
+	}, body)
+	if got := lookup(sent, "max_tokens"); got != "20000" {
+		t.Errorf("max_tokens = %q, want %q from the protocol itself", got, "20000")
 	}
 }
 

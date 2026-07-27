@@ -18,11 +18,23 @@ const Name = "anthropic-messages"
 // request is rejected before it is read.
 const Version = "2023-06-01"
 
+// DefaultMaxTokens is the cap sent when this wire format requires one and
+// neither flag nor body supplied it. A cap that has to be guessed should err
+// toward not being the thing that ruins the answer, and on a reasoning model
+// the cap covers thinking and output together, so a small one truncates
+// mid-thought.
+const DefaultMaxTokens = 20000
+
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
 		Name:   Name,
 		Path:   "/messages",
 		KeyEnv: "ANTHROPIC_API_KEY",
+		// A request under the guessed cap may legitimately run long, and this
+		// endpoint's own SDKs require streaming at such a cap to avoid HTTP
+		// timeouts. Invisible to the caller: folding the stream yields exactly
+		// the buffered body.
+		StreamUpstream: true,
 		Headers: func(key string) map[string]string {
 			return map[string]string{
 				"x-api-key":         key,
@@ -54,13 +66,14 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	}
 	drops = append(drops, dialect.Unread(req, carries)...)
 
-	cap, _ := base.WithMaxTokens(backend.Quirks, req.MaxOutputTokens)
-	if cap == nil {
-		return dialect.Encoded{}, fmt.Errorf(
-			"%s requires an output cap and none was supplied: pass --max-tokens or set it in the body (field max_tokens)", Name)
+	// This is the one wire format that will not accept a request without a
+	// cap, so it is the one place absent may not stay absent.
+	cap := DefaultMaxTokens
+	if req.MaxOutputTokens != nil {
+		cap = *req.MaxOutputTokens
 	}
 
-	body := wireRequest{Model: base.GetModel(req), MaxTokens: *cap, Stream: stream}
+	body := wireRequest{Model: base.GetModel(req), MaxTokens: cap, Stream: stream}
 
 	system, messages, itemDrops, err := buildMessages(req)
 	if err != nil {

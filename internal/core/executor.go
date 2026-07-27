@@ -51,7 +51,7 @@ func (e HTTPExecutor) Do(ctx context.Context, call Call) (json.RawMessage, error
 		return nil, Fail(ExitBackend, "reading response: %s", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return body, Fail(ExitBackend, "backend returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return body, FailBackend(resp.StatusCode, "backend returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return body, nil
 }
@@ -64,7 +64,7 @@ func (e HTTPExecutor) Stream(ctx context.Context, call Call, onFrame func(base.F
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return Fail(ExitBackend, "backend returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return FailBackend(resp.StatusCode, "backend returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return ReadFrames(resp.Body, onFrame)
 }

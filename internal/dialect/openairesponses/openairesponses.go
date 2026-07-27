@@ -49,8 +49,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	if req.Reasoning != nil && base.Differs(req.Raw, "reasoning", req.Reasoning) {
 		changes["reasoning"] = req.Reasoning
 	}
-	cap, _ := base.WithMaxTokens(backend.Quirks, req.MaxOutputTokens)
-	if cap != nil && base.Differs(req.Raw, "max_output_tokens", *cap) {
+	if cap := req.MaxOutputTokens; cap != nil && base.Differs(req.Raw, "max_output_tokens", *cap) {
 		changes["max_output_tokens"] = *cap
 	}
 	body, err := base.Patch(req.Raw, changes)

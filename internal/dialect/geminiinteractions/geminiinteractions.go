@@ -86,7 +86,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	}
 
 	config := wireGenerationConfig{}
-	if cap, _ := base.WithMaxTokens(backend.Quirks, req.MaxOutputTokens); cap != nil {
+	if cap := req.MaxOutputTokens; cap != nil {
 		config.MaxOutputTokens = cap
 	}
 	if effort := base.GetEffort(req); effort != "" {

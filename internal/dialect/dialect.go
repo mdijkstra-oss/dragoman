@@ -44,6 +44,12 @@ type Dialect struct {
 	// Anything it does not name is unimplemented, so the backlog stays
 	// visible inside the list of permanent impossibilities.
 	DropTable map[string]base.DropReason
+
+	// StreamUpstream marks a wire format dragoman must stream from even to
+	// answer a buffered request. It lives here rather than beside an endpoint
+	// because no endpoint speaking the format wants it off, and folding the
+	// resulting stream is defined to produce exactly the buffered response.
+	StreamUpstream bool
 }
 
 // State is a dialect's own parsing state. It is threaded through StreamPieces

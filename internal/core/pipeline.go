@@ -81,7 +81,7 @@ func Translate(catalog Catalog, opts Options, body []byte) (base.Request, base.B
 	spoken := catalog.Dialects[backend.Dialect]
 
 	req = Resolve(req, opts)
-	upstream := WantsEvents(req, opts) || backend.Quirks.StreamUpstream
+	upstream := WantsEvents(req, opts) || spoken.StreamUpstream
 
 	encoded, err := spoken.Encode(req, backend, upstream)
 	if err != nil {
@@ -111,11 +111,11 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 
 	key := os.Getenv(backend.KeyEnv)
 	if key == "" {
-		return result, Fail(ExitUsage, "missing credential: set %s", backend.KeyEnv)
+		return result, Fail(ExitUsage, "missing credential: set %s: %w", backend.KeyEnv, ErrMissingCredential)
 	}
 
 	wantsEvents := WantsEvents(req, opts)
-	upstream := wantsEvents || backend.Quirks.StreamUpstream
+	upstream := wantsEvents || spoken.StreamUpstream
 
 	call := Call{
 		URL:     dialect.Endpoint(spoken, backend),

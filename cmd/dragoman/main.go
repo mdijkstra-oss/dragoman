@@ -1,30 +1,45 @@
 // Command dragoman translates an openai-responses request to a backend
-// speaking another dialect and translates the answer back, so the client never
-// learns which provider answered.
+// speaking another protocol and translates the answer back, so the client never
+// learns which provider answered. It does that once over a pipe, or for as long
+// as it runs over HTTP.
 package main
 
 import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/kong"
 
 	"github.com/matthijn/dragoman/internal/catalog"
+	"github.com/matthijn/dragoman/internal/config"
 	"github.com/matthijn/dragoman/internal/core"
 	"github.com/matthijn/dragoman/internal/dialect/openairesponses"
 	"github.com/matthijn/dragoman/internal/transport/pipe"
+	"github.com/matthijn/dragoman/internal/transport/serve"
 )
 
 // CLI is the command line. It owns argv parsing, reading and writing the
-// streams, event framing, and the exit code — and owns nothing else.
+// streams, and the exit code — and owns nothing else.
 type CLI struct {
-	Protocol        string `help:"Dialect the caller speaks." default:"openai-responses" enum:"openai-responses"`
-	BackendProtocol string `help:"Dialect the backend speaks." name:"backend-protocol"`
+	Translate TranslateCmd `cmd:"" default:"withargs" help:"Translate one request from stdin to stdout."`
+	Serve     ServeCmd     `cmd:"" help:"Serve the service table over HTTP."`
+	Config    ConfigCmd    `cmd:"" help:"Print the service table this binary would serve."`
+}
+
+// TranslateCmd is the original command line, unchanged: it stays the default so
+// that a pipe invocation never has to name it.
+type TranslateCmd struct {
+	Protocol        string `help:"Protocol the caller speaks." default:"openai-responses" enum:"openai-responses"`
+	BackendProtocol string `help:"Protocol the backend speaks." name:"backend-protocol"`
 	Endpoint        string `help:"Backend base URL."`
-	Backend         string `help:"Named backend preset."`
+	Backend         string `help:"Named service from the table."`
 
 	Model     string `help:"Model to request. Passed through untouched."`
 	Effort    string `help:"Reasoning level. Passed through untouched."`
@@ -39,6 +54,21 @@ type CLI struct {
 
 	File   string `help:"Read the request from a file instead of stdin." short:"f" type:"path"`
 	Output string `help:"Write the result to a file instead of stdout." short:"o" type:"path"`
+
+	ConfigFile string `help:"Service table to use instead of the built-in one." name:"config" type:"path"`
+}
+
+// ServeCmd is the HTTP surface over the same core. It binds loopback by
+// default: an instance holding provider keys that needs to be reachable belongs
+// behind something that does authentication as its actual job.
+type ServeCmd struct {
+	Addr       string `help:"Address to listen on." default:"127.0.0.1:8080"`
+	ConfigFile string `help:"Service table to serve instead of the built-in one." name:"config" type:"path"`
+	Strict     bool   `help:"Treat any dropped field as an error, for every request served."`
+}
+
+type ConfigCmd struct {
+	ConfigFile string `help:"Print this table instead of the built-in one." name:"config" type:"path"`
 }
 
 func main() {
@@ -51,39 +81,50 @@ func run() int {
 		kong.Name("dragoman"),
 		kong.Description("A stateless protocol-translating LLM proxy.\n\n"+
 			"Reads an openai-responses request and returns an openai-responses response,\n"+
-			"whichever dialect the backend speaks. Credentials come from the environment."),
+			"whichever protocol the backend speaks. Credentials come from the environment."),
 		kong.UsageOnError(),
 		// kong's own failure path exits 1, which is reserved here for "the
 		// backend said no". Bad flags are a dragoman failure and must be 2.
 		kong.Exit(func(code int) { panic(usageExit{code: code}) }),
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "dragoman: %s\n", err)
-		return int(core.ExitUsage)
+		return fail(err)
 	}
 
-	code, parsed := parse(parser, os.Args[1:])
+	command, code, parsed := parse(parser, os.Args[1:])
 	if !parsed {
 		return code
 	}
 
+	switch command {
+	case "serve":
+		return serveCommand(cli.Serve)
+	case "config":
+		return configCommand(cli.Config)
+	default:
+		return translateCommand(cli.Translate)
+	}
+}
+
+func translateCommand(cli TranslateCmd) int {
 	options, err := options(cli)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "dragoman: %s\n", err)
-		return int(core.ExitUsage)
+		return fail(err)
+	}
+	known, err := table(cli.ConfigFile)
+	if err != nil {
+		return fail(err)
 	}
 
 	input, err := pipe.OpenInput(cli.File)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "dragoman: %s\n", err)
-		return int(core.ExitUsage)
+		return fail(err)
 	}
 	defer input.Close()
 
 	output, err := pipe.OpenOutput(cli.Output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "dragoman: %s\n", err)
-		return int(core.ExitUsage)
+		return fail(err)
 	}
 	defer output.Close()
 
@@ -91,14 +132,81 @@ func run() int {
 	defer buffered.Flush()
 
 	streams := pipe.Streams{In: input, Out: buffered, Err: os.Stderr}
-	executor := core.NewHTTPExecutor()
-	return pipe.Run(context.Background(), catalog.New(), options, streams, executor,
+	return pipe.Run(context.Background(), known, options, streams, core.NewHTTPExecutor(),
 		pipe.Report{Verbose: cli.Verbose, Timing: cli.Timing})
 }
 
-// parse runs kong and converts its exit into dragoman's own, so that a bad
-// flag never surfaces as the code reserved for a backend refusal.
-func parse(parser *kong.Kong, args []string) (code int, parsed bool) {
+func serveCommand(cli ServeCmd) int {
+	known, err := table(cli.ConfigFile)
+	if err != nil {
+		return fail(err)
+	}
+	handler := serve.New(serve.Config{
+		Catalog:  known,
+		Executor: core.NewHTTPExecutor(),
+		Strict:   cli.Strict,
+		Log:      slog.New(slog.NewTextHandler(os.Stderr, nil)),
+	})
+	fmt.Fprintf(os.Stderr, "dragoman: serving %s on %s\n",
+		strings.Join(names(known), ", "), cli.Addr)
+
+	// No write timeout: an answer may legitimately run long, and a deadline
+	// here would truncate a stream the caller is still reading.
+	server := &http.Server{Addr: cli.Addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	if err := server.ListenAndServe(); err != nil {
+		return fail(err)
+	}
+	return int(core.ExitOK)
+}
+
+func names(known core.Catalog) []string {
+	served := make([]string, 0, len(known.Presets))
+	for name := range known.Presets {
+		served = append(served, name)
+	}
+	sort.Strings(served)
+	return served
+}
+
+func configCommand(cli ConfigCmd) int {
+	document := config.Default
+	if cli.ConfigFile != "" {
+		read, err := os.ReadFile(cli.ConfigFile)
+		if err != nil {
+			return fail(err)
+		}
+		document = read
+	}
+	// Parsed before it is printed, so that printing a table is also a way to
+	// find out whether dragoman can serve it.
+	if _, err := catalog.Load(document); err != nil {
+		return fail(err)
+	}
+	os.Stdout.Write(document)
+	return int(core.ExitOK)
+}
+
+// table resolves the service table an invocation runs against. A file replaces
+// the built-in one wholesale: the file in front of you is the whole answer to
+// what this instance serves.
+func table(path string) (core.Catalog, error) {
+	if path == "" {
+		return catalog.New(), nil
+	}
+	document, err := os.ReadFile(path)
+	if err != nil {
+		return core.Catalog{}, err
+	}
+	services, err := catalog.Load(document)
+	if err != nil {
+		return core.Catalog{}, err
+	}
+	return core.Catalog{Dialects: catalog.Dialects(), Presets: services}, nil
+}
+
+// parse runs kong and converts its exit into dragoman's own, so that a bad flag
+// never surfaces as the code reserved for a backend refusal.
+func parse(parser *kong.Kong, args []string) (command string, code int, parsed bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			exit, isUsage := recovered.(usageExit)
@@ -108,20 +216,21 @@ func parse(parser *kong.Kong, args []string) (code int, parsed bool) {
 			// Help and version leave through kong's zero; anything else is a
 			// dragoman failure and must not borrow the backend's code.
 			if exit.code == 0 {
-				code, parsed = int(core.ExitOK), false
+				command, code, parsed = "", int(core.ExitOK), false
 				return
 			}
-			code, parsed = int(core.ExitUsage), false
+			command, code, parsed = "", int(core.ExitUsage), false
 		}
 	}()
-	if _, err := parser.Parse(args); err != nil {
+	context, err := parser.Parse(args)
+	if err != nil {
 		parser.Errorf("%s", err)
-		return int(core.ExitUsage), false
+		return "", int(core.ExitUsage), false
 	}
-	return int(core.ExitOK), true
+	return strings.Fields(context.Command())[0], int(core.ExitOK), true
 }
 
-func options(cli CLI) (core.Options, error) {
+func options(cli TranslateCmd) (core.Options, error) {
 	if cli.Protocol != openairesponses.Name {
 		return core.Options{}, fmt.Errorf("unknown protocol %q", cli.Protocol)
 	}
@@ -141,13 +250,18 @@ func options(cli CLI) (core.Options, error) {
 		Strict:          cli.Strict,
 		NoExecute:       cli.NoExecute,
 		Raw:             cli.Raw,
+		Stream:          cli.Stream,
 	}
 	if cli.MaxTokens > 0 {
 		cap := cli.MaxTokens
 		opts.MaxTokens = &cap
 	}
-	opts.Stream = cli.Stream
 	return opts, nil
+}
+
+func fail(err error) int {
+	fmt.Fprintf(os.Stderr, "dragoman: %s\n", err)
+	return int(core.CodeOf(err))
 }
 
 // usageExit is how kong's exit is caught so dragoman owns the code.

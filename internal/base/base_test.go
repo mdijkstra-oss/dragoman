@@ -248,34 +248,6 @@ func TestOpenIdentifiedKeepsProviderItemID(t *testing.T) {
 	}
 }
 
-func TestWithMaxTokensOnlyInventsWhenRequired(t *testing.T) {
-	fallback := 20000
-	requested := 512
-	cases := []struct {
-		name      string
-		quirks    Quirks
-		requested *int
-		want      *int
-		invented  bool
-	}{
-		{name: "absent stays absent", quirks: Quirks{}, requested: nil, want: nil},
-		{name: "request wins", quirks: Quirks{RequiresMaxTokens: true, MaxTokensFallback: &fallback}, requested: &requested, want: &requested},
-		{name: "fallback fires only when required", quirks: Quirks{RequiresMaxTokens: true, MaxTokensFallback: &fallback}, requested: nil, want: &fallback, invented: true},
-		{name: "no fallback for the others", quirks: Quirks{MaxTokensFallback: &fallback}, requested: nil, want: nil},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			got, invented := WithMaxTokens(testCase.quirks, testCase.requested)
-			if !reflect.DeepEqual(got, testCase.want) {
-				t.Errorf("cap = %v, want %v", derefInt(got), derefInt(testCase.want))
-			}
-			if invented != testCase.invented {
-				t.Errorf("invented = %v, want %v", invented, testCase.invented)
-			}
-		})
-	}
-}
-
 func assertDenseSequence(t *testing.T, events []Event) {
 	t.Helper()
 	for index, event := range events {
@@ -296,11 +268,4 @@ func sameJSON(t *testing.T, left, right []byte) bool {
 		t.Fatalf("right: %v", err)
 	}
 	return reflect.DeepEqual(a, b)
-}
-
-func derefInt(value *int) any {
-	if value == nil {
-		return nil
-	}
-	return *value
 }
