@@ -3,6 +3,7 @@
 # make run < request.json          no PROMPT: a whole request off stdin
 # make run BACKEND=claude-cli      the locally installed CLI; no key needed
 # make serve [ADDR=]               the built-in table over HTTP
+# make serve-dev [ADDR=]           the same, rebuilt and restarted on a change
 # Keys come from .env.local. ARGS goes straight to dragoman (--stream, --raw,
 # --no-execute, -v ...). JQ=. prints the whole response.
 
@@ -17,11 +18,14 @@ JQ ?= {status, model, text: ([.output[] | select(.type=="message") | .content[].
 ADDR ?= 127.0.0.1:8080
 
 BIN := bin/dragoman
+# The service table is embedded, so a table edit is a source change like any
+# other and has to rebuild the binary.
+SOURCES := $(shell find cmd internal \( -name '*.go' -o -name '*.yaml' \) 2>/dev/null)
 export PROMPT MODEL REASONING
 
-.PHONY: run serve
+.PHONY: run serve serve-dev
 
-$(BIN): $(shell find cmd internal -name '*.go' 2>/dev/null)
+$(BIN): $(SOURCES)
 	@go build -o $(BIN) ./cmd/dragoman
 
 # No PROMPT means the request itself is on stdin. Otherwise jq builds the body,
@@ -37,6 +41,18 @@ run: $(BIN)
 
 # No --config: the embedded table is the whole of what this serves. A service
 # whose key is missing from .env.local still starts and fails when it is called.
-serve: $(BIN)
-	@set -a; [ -f ./.env.local ] && . ./.env.local; set +a; \
+SERVE = set -a; [ -f ./.env.local ] && . ./.env.local; set +a; \
 	exec $(BIN) serve --addr $(ADDR) $(ARGS)
+
+serve: $(BIN)
+	@$(SERVE)
+
+# serve-dev is serve rebuilt and restarted on every source change. The .yaml is
+# there because the service table is embedded: editing it is editing the binary.
+# watchexec runs the build itself rather than calling back into make, so that a
+# restart is the server dying and nothing else reporting on it.
+serve-dev:
+	@command -v watchexec >/dev/null || { \
+	  echo "serve-dev needs watchexec: brew install watchexec" >&2; exit 1; }
+	@exec watchexec --restart --exts go,yaml --watch cmd --watch internal \
+	  -- 'go build -o $(BIN) ./cmd/dragoman && { $(SERVE); }'
