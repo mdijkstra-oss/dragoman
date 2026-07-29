@@ -727,4 +727,107 @@ func TestClaudeCLIBufferedCallIsNamed(t *testing.T) {
 	}
 }
 
+// TestChildEnvDropsWhatReroutesTheAccount covers which variables reach a
+// spawned CLI. The CLI prefers an API key in its environment over the sign-in
+// it already performed, so anything in that namespace has to be dropped rather
+// than forwarded — and everything else has to survive, since the child needs a
+// working environment to run in at all.
+func TestChildEnvDropsWhatReroutesTheAccount(t *testing.T) {
+	cases := []struct {
+		name    string
+		entry   string
+		dropped bool
+	}{
+		{name: "the key that caused this", entry: "ANTHROPIC_API_KEY=sk-ant-1", dropped: true},
+		{name: "the token form of it", entry: "ANTHROPIC_AUTH_TOKEN=tok", dropped: true},
+		{name: "a redirected endpoint", entry: "ANTHROPIC_BASE_URL=https://proxy", dropped: true},
+		// The prefix is the point: a variable no release has shipped yet must not
+		// reopen this hole.
+		{name: "a variable from a later release", entry: "ANTHROPIC_SOMETHING_NEW=1", dropped: true},
+		{name: "bedrock billing", entry: "CLAUDE_CODE_USE_BEDROCK=1", dropped: true},
+		{name: "vertex billing", entry: "CLAUDE_CODE_USE_VERTEX=1", dropped: true},
+		// Where the interactive credential lives is what is being preserved, so a
+		// CLAUDE_ prefix scrub would break the sign-in this exists to protect.
+		{name: "the config directory survives", entry: "CLAUDE_CONFIG_DIR=/home/u/.claude"},
+		{name: "the path survives", entry: "PATH=/usr/bin"},
+		{name: "the home directory survives", entry: "HOME=/home/u"},
+		{name: "another provider is not our business", entry: "OPENAI_API_KEY=sk-openai"},
+		{name: "a lookalike is not a prefix match", entry: "MY_ANTHROPIC_API_KEY=sk-ant-2"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := core.ChildEnv([]string{"PATH=/bin", testCase.entry, "HOME=/root"})
+			if slices.Contains(got, testCase.entry) == testCase.dropped {
+				verb := "survived"
+				if testCase.dropped {
+					verb = "was dropped"
+				}
+				t.Errorf("%q %s: %q", testCase.entry, verb, got)
+			}
+			// A child with no PATH cannot run, so the filter must never be a
+			// wholesale replacement of the environment.
+			if !slices.Contains(got, "PATH=/bin") || !slices.Contains(got, "HOME=/root") {
+				t.Errorf("the ordinary environment did not survive: %q", got)
+			}
+		})
+	}
+}
+
+// TestInheritedKeyNeverReachesTheCLI is the regression this whole scrub exists
+// for. An ANTHROPIC_API_KEY in dragoman's own environment — sourced from an
+// env file, exported in a shell profile, injected by CI — used to be inherited
+// by the child, and the CLI would quietly answer on that account instead of the
+// subscription it was signed in with. The stub is a real spawned process, so
+// what it sees is what the installed CLI would see.
+func TestInheritedKeyNeverReachesTheCLI(t *testing.T) {
+	answer := "cat " + filepath.Join("..", "..", "testdata", "fixtures", "claude-cli", "stream.ndjson")
+
+	cases := []struct {
+		name   string
+		script string
+		says   string
+	}{
+		{
+			name: "the call does not inherit it",
+			// The child reports the leak in the one channel it has, so a failure
+			// here names the variable rather than a decoding symptom of it.
+			script: signedIn +
+				`if [ -n "$ANTHROPIC_API_KEY" ]; then ` +
+				`echo '{"is_error":true,"result":"ANTHROPIC_API_KEY reached the child","type":"result"}'; exit 0; fi` +
+				"\n" + answer,
+			says: "ANTHROPIC_API_KEY reached the child",
+		},
+		{
+			// Preflight is a second spawn, and one that reports healthy while the
+			// key is in place is how this stayed invisible: the CLI answers
+			// loggedIn either way, just on a different account.
+			name: "preflight does not inherit it",
+			script: `if [ "$1" = "auth" ]; then ` +
+				`if [ -n "$ANTHROPIC_API_KEY" ]; then echo '{"loggedIn":false}'; else echo '{"loggedIn":true}'; fi; ` +
+				`exit 0; fi` + "\n" + answer,
+			says: "not authenticated",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-inherited-from-the-parent")
+			binary := stubCLI(t, testCase.script)
+
+			result, err := core.Run(context.Background(), catalog.New(), core.Options{
+				BackendProtocol: "anthropic-messages",
+				Endpoint:        "exec:" + binary,
+				Model:           "sonnet",
+			}, knowledgeRequest(t), nil, nil)
+			if err != nil {
+				t.Fatalf("the child saw the parent's key (%s): %v", testCase.says, err)
+			}
+			// The recorded answer proves the stub ran to completion rather than
+			// the run passing because nothing was spawned at all.
+			if result.Response == nil || !strings.Contains(base.FindText(*result.Response), "Rio de Janeiro") {
+				t.Errorf("answer = %+v, want the recorded one", result.Response)
+			}
+		})
+	}
+}
+
 func contains(argv []string, value string) bool { return slices.Contains(argv, value) }

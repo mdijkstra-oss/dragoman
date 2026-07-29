@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -62,6 +63,7 @@ func (e ClaudeCLIExecutor) Stream(ctx context.Context, call Call, onFrame func(b
 	defer stop()
 
 	command := exec.CommandContext(ctx, binary, argv...)
+	command.Env = ChildEnv(os.Environ())
 	command.Stdin = bytes.NewReader(stdin)
 	// A killed child can still leave a pipe open behind it, and Wait would
 	// then wait on the pipe rather than on the process.
@@ -110,7 +112,11 @@ func Preflight(ctx context.Context, binary string) error {
 		return Fail(ExitUsage,
 			"claude-cli backend: %q not found on PATH; install Claude Code or pass --endpoint exec:/path/to/claude", binary)
 	}
-	reported, err := exec.CommandContext(ctx, path, "auth", "status", "--json").Output()
+	// The same environment the call will run in, or preflight would describe an
+	// account other than the one that answers.
+	check := exec.CommandContext(ctx, path, "auth", "status", "--json")
+	check.Env = ChildEnv(os.Environ())
+	reported, err := check.Output()
 	if err != nil {
 		return Fail(ExitUsage,
 			`claude-cli backend: could not read authentication status from %s; run "claude auth login"`, binary)
@@ -161,6 +167,43 @@ func Command(body []byte) ([]string, []byte, error) {
 		stdin = append(append(stdin, line...), '\n')
 	}
 	return argv, stdin, nil
+}
+
+// ChildEnv builds the environment a spawned CLI runs in. Everything is passed
+// on but the variables that decide which account answers: the CLI prefers an
+// API key in its environment over the sign-in it already performed, so a key
+// dragoman merely inherited — from a shell profile, a CI secret, a container
+// flag — would silently move the call onto a different account and bill it
+// there. Reaching a CLI that holds its own credential is the whole reason this
+// backend exists, so an inherited credential is dropped rather than forwarded.
+//
+// This is a prefix rather than a list of names because the list is the part
+// that goes stale: a variable added by a later release would reopen exactly
+// this hole. It performs no IO, so what a child inherits is testable without
+// spawning anything.
+func ChildEnv(environ []string) []string {
+	kept := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		if reroutes(name) {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
+}
+
+// reroutes reports whether a variable decides which account answers. The
+// ANTHROPIC_ namespace goes wholesale: dragoman passes the model, the effort
+// and the schema as flags and the messages on stdin, so it needs nothing from
+// it. CLAUDE_CONFIG_DIR is deliberately not here — it says where the
+// interactive credential lives, which is the thing being preserved, and a
+// CLAUDE_ prefix scrub would break the sign-in it is meant to protect.
+func reroutes(name string) bool {
+	if strings.HasPrefix(name, "ANTHROPIC_") {
+		return true
+	}
+	return name == "CLAUDE_CODE_USE_BEDROCK" || name == "CLAUDE_CODE_USE_VERTEX"
 }
 
 // BinaryOf reads the binary out of an exec endpoint. It is a name resolved on
