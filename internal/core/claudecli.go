@@ -90,7 +90,7 @@ func (e ClaudeCLIExecutor) Stream(ctx context.Context, call Call, onFrame func(b
 		return readErr
 	}
 	if outcome.Failed {
-		return Fail(ExitBackend, "the claude CLI reported %s: %s", outcome.Status, outcome.Message)
+		return Fail(ExitBackend, "the claude CLI reported %s%s", outcome.Status, said(outcome.Message, diagnostics))
 	}
 	if waitErr != nil {
 		return Fail(ExitBackend, "%s: %s%s", binary, waitErr, detail(diagnostics))
@@ -283,13 +283,40 @@ var opaqueArgs = []string{
 	"--no-session-persistence",
 }
 
+// resultOutcome reads what the terminal frame reported. A run that failed
+// before the model answered fills in neither the status nor the result, and
+// names the kind of failure in the subtype alone — which is then the only thing
+// there is to tell the caller.
 func resultOutcome(frame cliFrame) CLIOutcome {
 	outcome := CLIOutcome{Seen: true, Failed: frame.IsError, Message: frame.Result}
-	outcome.Status = "an error"
-	if frame.APIErrorStatus != nil {
+	switch {
+	case frame.APIErrorStatus != nil:
 		outcome.Status = fmt.Sprintf("HTTP %d", *frame.APIErrorStatus)
+	case frame.Subtype != "" && frame.Subtype != "success":
+		outcome.Status = frame.Subtype
+	default:
+		outcome.Status = "an error"
 	}
 	return outcome
+}
+
+// said renders everything the CLI offered about a failure: the frame's own
+// words, then the child's stderr, which is where a failure with an empty result
+// tends to have said what happened. A report that trails off after the colon
+// tells the caller only that dragoman was there, so the absence of both is
+// spelled out rather than left as punctuation.
+func said(message string, diagnostics *bytes.Buffer) string {
+	spoken := []string{}
+	if message = strings.TrimSpace(message); message != "" {
+		spoken = append(spoken, message)
+	}
+	if text := strings.TrimSpace(diagnostics.String()); text != "" {
+		spoken = append(spoken, text)
+	}
+	if len(spoken) == 0 {
+		return " and gave no message"
+	}
+	return ": " + strings.Join(spoken, "; ")
 }
 
 func detail(diagnostics *bytes.Buffer) string {
@@ -334,6 +361,7 @@ type cliLine struct {
 
 type cliFrame struct {
 	Type           string          `json:"type"`
+	Subtype        string          `json:"subtype"`
 	Event          json.RawMessage `json:"event"`
 	IsError        bool            `json:"is_error"`
 	APIErrorStatus *int            `json:"api_error_status"`

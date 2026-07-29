@@ -319,6 +319,24 @@ func TestCLIErrorFrameIsABackendFailure(t *testing.T) {
 	}
 }
 
+// TestACLIErrorWithoutAResultIsStillNamed covers the frame that reports a
+// failure and fills in nothing else. The kind of failure is in the subtype, and
+// it is the whole of what the caller can be told.
+func TestACLIErrorWithoutAResultIsStillNamed(t *testing.T) {
+	const failed = `{"is_error":true,"subtype":"error_during_execution","type":"result"}`
+
+	outcome, err := core.ReadCLIFrames(strings.NewReader(failed), func(base.Frame) error { return nil })
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !outcome.Failed {
+		t.Fatal("an error frame was read as success")
+	}
+	if outcome.Status != "error_during_execution" {
+		t.Errorf("status = %q, want the kind of failure the CLI named", outcome.Status)
+	}
+}
+
 // TestClaudeCLIDropsWhatItCannotDo covers the three capabilities this backend
 // has no channel for. Each is unsupported rather than unimplemented: no amount
 // of work in dragoman would add them.
@@ -626,6 +644,22 @@ func TestClaudeCLIExecutorSpawnsAndReports(t *testing.T) {
 			script: signedIn +
 				`echo '{"is_error":true,"api_error_status":404,"result":"no such model","type":"result"}'`,
 			code: core.ExitBackend, says: "404",
+		},
+		{
+			// A failure with an empty result is the shape that reaches a caller
+			// as a sentence ending at the colon. What the CLI did say is in the
+			// subtype and on its stderr, and both are the answer to "why".
+			name: "the CLI reports an error frame with no words",
+			script: signedIn + `echo "credit balance is too low" >&2` + "\n" +
+				`echo '{"is_error":true,"subtype":"error_during_execution","type":"result"}'`,
+			code: core.ExitBackend, says: "error_during_execution: credit balance is too low",
+		},
+		{
+			// And when there is nothing at all, saying so beats trailing off.
+			name: "the CLI reports an error frame and says nothing",
+			script: signedIn +
+				`echo '{"is_error":true,"type":"result"}'`,
+			code: core.ExitBackend, says: "an error and gave no message",
 		},
 	}
 	for _, testCase := range cases {
