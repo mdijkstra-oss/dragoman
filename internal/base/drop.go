@@ -7,9 +7,10 @@ import (
 	"strings"
 )
 
-// DropReason separates the two kinds of drop, because they have opposite
+// DropReason separates the kinds of drop, because they have opposite
 // lifetimes. Without the distinction the backlog is invisible inside a list of
-// permanent impossibilities.
+// permanent impossibilities, and both are invisible inside a list of fields
+// whose going missing changed nothing.
 type DropReason string
 
 const (
@@ -17,6 +18,10 @@ const (
 	DropUnsupported DropReason = "unsupported"
 	// DropUnimplemented: dragoman could map it and does not yet.
 	DropUnimplemented DropReason = "unimplemented"
+	// DropInert: the target dialect has no equivalent and needs none, because
+	// the field could not have changed the answer — a label on a schema, or a
+	// flag asking for behaviour the target has anyway. Recorded, not raised.
+	DropInert DropReason = "inert"
 )
 
 // Drop is a field present in a body that no typed field consumed. Entries
@@ -26,6 +31,25 @@ type Drop struct {
 	Path   string     `json:"path"`
 	Reason DropReason `json:"reason"`
 	Detail string     `json:"detail,omitempty"`
+}
+
+// Notable reports whether a drop is worth interrupting a reader for. Only an
+// inert drop is not: nothing about the request or the answer differs for its
+// absence, so warning about it teaches a caller to ignore warnings.
+func (d Drop) Notable() bool { return d.Reason != DropInert }
+
+// PartitionDrops splits drops into the ones that changed the exchange and the
+// ones that could not have. Transports report the first at their loud level
+// and the second at their quiet one; neither is thrown away.
+func PartitionDrops(drops []Drop) (notable, inert []Drop) {
+	for _, drop := range drops {
+		if drop.Notable() {
+			notable = append(notable, drop)
+			continue
+		}
+		inert = append(inert, drop)
+	}
+	return notable, inert
 }
 
 // Diff computes the dropped fields of a body against the typed value that

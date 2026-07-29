@@ -314,6 +314,39 @@ func TestDropsGoToTheLogAndNotTheBody(t *testing.T) {
 	}
 }
 
+// TestAnInertDropIsLoggedBelowAWarning keeps the warnings worth reading. A
+// field whose absence changed nothing recurs on every request of a kind, and an
+// operator who learns to skim those skims the drop that mattered with them.
+func TestAnInertDropIsLoggedBelowAWarning(t *testing.T) {
+	body := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],` +
+		`"text":{"format":{"type":"json_schema","name":"p","strict":true,"schema":{"type":"object"}}}}`)
+
+	warned, everything := &bytes.Buffer{}, &bytes.Buffer{}
+	for _, level := range []struct {
+		name string
+		sink *bytes.Buffer
+		opts *slog.HandlerOptions
+	}{
+		{name: "warn", sink: warned, opts: nil},
+		{name: "debug", sink: everything, opts: &slog.HandlerOptions{Level: slog.LevelDebug}},
+	} {
+		server := listen(t, serve.Config{
+			Executor: fixtures("anthropic"),
+			Log:      slog.New(slog.NewTextHandler(level.sink, level.opts)),
+		})
+		if answered := send(t, server, http.MethodPost, "/anthropic/responses", body); answered.status != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
+		}
+	}
+
+	if strings.Contains(warned.String(), "text.format") {
+		t.Errorf("an inert drop was raised as a warning: %q", warned.String())
+	}
+	if !strings.Contains(everything.String(), "text.format") {
+		t.Errorf("an inert drop went unrecorded at debug: %q", everything.String())
+	}
+}
+
 // TestStrictRefusesBeforeSending covers the flag's whole job: under strict a
 // field that would be dropped is a refused request, and refusing after the
 // backend was already paid for would be no refusal at all.

@@ -104,12 +104,11 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 			Schema:   format.Schema,
 		}
 		if format.Strict != nil {
-			drops = append(drops, base.Drop{Path: "text.format.strict", Reason: base.DropUnsupported,
-				Detail: Name + " has no strictness flag on a response format"})
+			drops = append(drops, strictness(*format.Strict))
 		}
 		if format.Name != "" {
-			drops = append(drops, base.Drop{Path: "text.format.name", Reason: base.DropUnsupported,
-				Detail: Name + " has no name on a response format"})
+			drops = append(drops, base.Drop{Path: "text.format.name", Reason: base.DropInert,
+				Detail: Name + " has no name on a response format, and a label on a schema changes no answer"})
 		}
 	}
 	if config != (wireGenerationConfig{}) {
@@ -121,6 +120,19 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 		return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", Name, err)
 	}
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
+}
+
+// strictness reports what became of the strict flag. A response schema on this
+// dialect constrains decoding whether or not it was asked to, so only half the
+// flag is lost: asking for strict is asking for what the request already gets,
+// and asking to relax it is the half that cannot be honoured.
+func strictness(strict bool) base.Drop {
+	if strict {
+		return base.Drop{Path: "text.format.strict", Reason: base.DropInert,
+			Detail: Name + " has no strictness flag: a response schema is always enforced"}
+	}
+	return base.Drop{Path: "text.format.strict", Reason: base.DropUnsupported,
+		Detail: Name + " has no strictness flag: the schema is enforced though the request asked it not to be"}
 }
 
 // buildSteps turns the base's item list into the step list. A function result

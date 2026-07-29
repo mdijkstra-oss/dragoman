@@ -260,6 +260,45 @@ func TestSchemaAgainstASchemalessBackendIsDropped(t *testing.T) {
 	}
 }
 
+// TestAFormatLabelIsAnInertDrop covers the third reason. Two dialects carry a
+// schema without carrying its name or its strict flag, and a schema they carry
+// is enforced anyway — so the request that asked for strict got what it asked
+// for, and only the request that asked to relax it lost something.
+func TestAFormatLabelIsAnInertDrop(t *testing.T) {
+	body := func(strict string) []byte {
+		return []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],` +
+			`"text":{"format":{"type":"json_schema","name":"p","strict":` + strict + `,"schema":{"type":"object"}}}}`)
+	}
+	for _, preset := range []string{"gemini", "anthropic"} {
+		t.Run(preset, func(t *testing.T) {
+			_, drops := translate(t, core.Options{Preset: preset}, body("true"))
+			for _, drop := range drops {
+				if drop.Reason != base.DropInert {
+					t.Errorf("%s = %q, want %q; nothing about the answer differs",
+						drop.Path, drop.Reason, base.DropInert)
+				}
+				if drop.Notable() {
+					t.Errorf("%s is notable, and a warning about it is one to skim past", drop.Path)
+				}
+			}
+
+			_, relaxed := translate(t, core.Options{Preset: preset}, body("false"))
+			for _, drop := range relaxed {
+				if drop.Path != "text.format.strict" {
+					continue
+				}
+				if drop.Reason != base.DropUnsupported {
+					t.Errorf("relaxed strict = %q, want %q; the schema is enforced regardless",
+						drop.Reason, base.DropUnsupported)
+				}
+			}
+			if !hasDropPath(relaxed, "text.format.strict") {
+				t.Errorf("a request that asked to relax the schema was told nothing: %v", relaxed)
+			}
+		})
+	}
+}
+
 // TestMixedStrictnessCannotBeExpressedPerRequest covers the named drop: one
 // dialect carries strictness per request, so a mix is inexpressible.
 func TestMixedStrictnessCannotBeExpressedPerRequest(t *testing.T) {

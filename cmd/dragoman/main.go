@@ -49,7 +49,7 @@ type TranslateCmd struct {
 	Strict    bool  `help:"Treat any dropped field as an error."`
 	NoExecute bool  `help:"Translate and print the request; make no call." name:"no-execute"`
 	Raw       bool  `help:"Return the backend's untranslated response."`
-	Verbose   bool  `help:"Write the translation and its dropped fields to stderr." short:"v"`
+	Verbose   bool  `help:"Write the translation and every dropped field to stderr." short:"v"`
 	Timing    bool  `help:"Write the elapsed time to stderr."`
 
 	File   string `help:"Read the request from a file instead of stdin." short:"f" type:"path"`

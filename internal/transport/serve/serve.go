@@ -173,12 +173,17 @@ func (s server) only(method string, next http.HandlerFunc) http.HandlerFunc {
 }
 
 // record puts drops in the server log and nowhere else. The response is the
-// answer; a caller who wants the diff has the pipe.
+// answer; a caller who wants the diff has the pipe. A warning is for the drops
+// that changed the exchange: an inert drop repeated on every request is how an
+// operator learns to skim past the warnings that matter, so it goes to debug.
 func (s server) record(service string, drops []base.Drop) {
-	if len(drops) == 0 {
-		return
+	notable, inert := base.PartitionDrops(drops)
+	if len(notable) > 0 {
+		s.log.Warn("dropped fields", "service", service, "drops", notable)
 	}
-	s.log.Warn("dropped fields", "service", service, "drops", drops)
+	if len(inert) > 0 {
+		s.log.Debug("dropped fields", "service", service, "drops", inert)
+	}
 }
 
 func (s server) fail(w http.ResponseWriter, r *http.Request, status int, message string) {

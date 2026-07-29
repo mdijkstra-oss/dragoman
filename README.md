@@ -297,11 +297,19 @@ caller's only signal.
 
 - **unsupported** — the target dialect has no equivalent and never will.
 - **unimplemented** — dragoman could map it and does not yet.
+- **inert** — the target has no equivalent and needs none: the field could not
+  have changed the answer. A schema's name is a label; `strict: true` against a
+  dialect that enforces a schema anyway is asking for what the request gets.
 
-By default the response is returned and drops go to stderr — to the server log
-on the listener, never into the answer. `--strict` makes any drop an error: exit
-`2`, nothing sent. Silence is not an option — a dropped field produces a
-confident, well-formed, wrong answer.
+By default the response is returned and the drops that changed the exchange go
+to stderr — to the server log as a warning on the listener, never into the
+answer. Silence is not an option — a dropped field produces a confident,
+well-formed, wrong answer. An inert drop is not that: it is kept for `-v` on the
+pipe and for the debug log on the listener, because a warning repeated on every
+request of a kind is how the warning that matters gets skimmed past.
+
+`--strict` makes any drop an error, inert included: exit `2`, nothing sent. The
+flag is for the caller who wants to hear about every difference.
 
 A schema sent to a service marked `no_schema` is the one drop that is the
 designed outcome: `text.format` goes, the drop is recorded, and the caller gets a
@@ -315,7 +323,7 @@ dragoman being broken. `--strict` promotes it like any other.
 |---|---|
 | `--no-execute` | translate the request, print what would have been sent, make no call |
 | `--raw` | return the backend's untranslated response |
-| `-v` | the translation and its dropped fields to stderr |
+| `-v` | the translation and every dropped field, inert ones included, to stderr |
 | `--timing` | elapsed round trip, and time to the first event, to stderr |
 
 `--raw` returns exactly what the backend sent. For a protocol that streams

@@ -94,12 +94,11 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 		}
 		body.OutputConfig.Format = &wireFormat{Type: format.Type, Schema: format.Schema}
 		if format.Name != "" {
-			drops = append(drops, base.Drop{Path: "text.format.name", Reason: base.DropUnsupported,
-				Detail: Name + " has no name on a structured-output format"})
+			drops = append(drops, base.Drop{Path: "text.format.name", Reason: base.DropInert,
+				Detail: Name + " has no name on a structured-output format, and a label on a schema changes no answer"})
 		}
 		if format.Strict != nil {
-			drops = append(drops, base.Drop{Path: "text.format.strict", Reason: base.DropUnsupported,
-				Detail: Name + " carries strictness per tool, not per format"})
+			drops = append(drops, strictness(*format.Strict))
 		}
 	}
 
@@ -108,6 +107,19 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 		return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", Name, err)
 	}
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
+}
+
+// strictness reports what became of the strict flag. This dialect carries
+// strictness per tool rather than per format, and a structured-output format
+// constrains decoding whether or not it was asked to, so asking for strict is
+// asking for what the request already gets; only asking to relax it is lost.
+func strictness(strict bool) base.Drop {
+	if strict {
+		return base.Drop{Path: "text.format.strict", Reason: base.DropInert,
+			Detail: Name + " carries strictness per tool, and a format is always enforced"}
+	}
+	return base.Drop{Path: "text.format.strict", Reason: base.DropUnsupported,
+		Detail: Name + " carries strictness per tool: the format is enforced though the request asked it not to be"}
 }
 
 // outputCap settles the one field this wire format will not accept a request

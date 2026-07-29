@@ -148,6 +148,32 @@ func TestDropsGoToStderr(t *testing.T) {
 	}
 }
 
+// TestAnInertDropWaitsForVerbose keeps stderr worth reading: a field whose
+// absence changed nothing is part of the diff rather than news, and -v is where
+// the caller asked for the whole diff.
+func TestAnInertDropWaitsForVerbose(t *testing.T) {
+	body := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],` +
+		`"text":{"format":{"type":"json_schema","name":"p","strict":true,"schema":{"type":"object"}}}}`)
+
+	_, quiet, code := run(t, core.Options{Preset: "anthropic"}, body)
+	if code != int(core.ExitOK) {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if strings.Contains(quiet, "text.format") {
+		t.Errorf("an inert drop was reported unasked: %q", quiet)
+	}
+
+	loud := &bytes.Buffer{}
+	t.Setenv(catalog.Presets()["anthropic"].KeyEnv, "test-key")
+	streams := pipe.Streams{In: bytes.NewReader(body), Out: &bytes.Buffer{}, Err: loud}
+	pipe.Run(context.Background(), catalog.New(), core.Options{Preset: "anthropic"}, streams,
+		recorded{dir: filepath.Join("..", "..", "..", "testdata", "fixtures", "anthropic")},
+		pipe.Report{Verbose: true})
+	if !strings.Contains(loud.String(), "text.format") {
+		t.Errorf("-v does not report the whole diff: %q", loud.String())
+	}
+}
+
 // TestNoExecutePrintsTheTranslation covers the whole pipeline minus the
 // network.
 func TestNoExecutePrintsTheTranslation(t *testing.T) {

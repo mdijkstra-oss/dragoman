@@ -64,9 +64,17 @@ func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams S
 	if report.Verbose {
 		writeVerbose(streams.Err, result)
 	}
-	// Drops are returned as data; the transport decides they go to stderr.
-	if len(result.Drops) > 0 && runErr == nil {
-		fmt.Fprintln(streams.Err, base.FormatDrops(result.Drops))
+	// Drops are returned as data; the transport decides they go to stderr. A
+	// drop that could not have changed the exchange is part of the diff rather
+	// than news, so it is kept for -v, where the caller asked for all of it.
+	if runErr == nil {
+		reported := result.Drops
+		if !report.Verbose {
+			reported, _ = base.PartitionDrops(result.Drops)
+		}
+		if len(reported) > 0 {
+			fmt.Fprintln(streams.Err, base.FormatDrops(reported))
+		}
 	}
 	if runErr != nil {
 		return fail(streams.Err, runErr)
