@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/catalog"
-	"github.com/matthijn/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/catalog"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
 )
 
 // spawned is a real executor backed by frames the installed CLI actually

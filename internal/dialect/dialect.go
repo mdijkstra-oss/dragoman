@@ -7,7 +7,7 @@ package dialect
 import (
 	"encoding/json"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 // Dialect is everything dragoman needs to talk one wire format. Translation

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/config"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/config"
 )
 
 // protocols is the set the real catalog speaks. It is restated here rather than

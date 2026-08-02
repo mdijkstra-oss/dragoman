@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/catalog"
-	"github.com/matthijn/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/catalog"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
 )
 
 // nonBase names the dialects that build a fresh body from typed fields, as

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/catalog"
-	"github.com/matthijn/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/catalog"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
 )
 
 // weatherRequest is the request the live matrix uses: one tool and a prompt

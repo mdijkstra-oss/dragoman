@@ -7,14 +7,14 @@ package catalog
 import (
 	"sort"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/config"
-	"github.com/matthijn/dragoman/internal/core"
-	"github.com/matthijn/dragoman/internal/dialect"
-	"github.com/matthijn/dragoman/internal/dialect/anthropicmessages"
-	"github.com/matthijn/dragoman/internal/dialect/geminiinteractions"
-	"github.com/matthijn/dragoman/internal/dialect/openaicompletions"
-	"github.com/matthijn/dragoman/internal/dialect/openairesponses"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/config"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect/anthropicmessages"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect/geminiinteractions"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect/openaicompletions"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect/openairesponses"
 )
 
 // New builds the catalog from the embedded service table.

@@ -3,7 +3,7 @@ package dialect
 import (
 	"fmt"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 // Carries declares which base request fields a dialect places somewhere. The

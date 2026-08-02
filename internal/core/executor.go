@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 type Call struct {

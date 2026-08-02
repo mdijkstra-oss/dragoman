@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/dialect"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
 // Catalog is the set of dialects dragoman knows and the presets that name

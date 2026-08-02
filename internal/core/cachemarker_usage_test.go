@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/catalog"
-	"github.com/matthijn/dragoman/internal/core"
-	"github.com/matthijn/dragoman/internal/dialect"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/catalog"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
 // The write count is the instrument the caching feature exists to surface:

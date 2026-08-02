@@ -12,8 +12,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
 )
 
 type Streams struct {

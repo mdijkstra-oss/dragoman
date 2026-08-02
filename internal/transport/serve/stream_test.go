@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 // TestFailIsSuppressedOnlyForAnAlreadyFailedSequence covers the difference

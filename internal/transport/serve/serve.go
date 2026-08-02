@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
 )
 
 // Config is what the operator settled before the listener runs. There is no

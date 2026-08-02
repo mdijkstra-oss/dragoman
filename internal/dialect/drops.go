@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 // outOfScope names the base fields the design puts out of scope for every

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/dialect"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
 // Name is the wire format most endpoints of this shape serve.

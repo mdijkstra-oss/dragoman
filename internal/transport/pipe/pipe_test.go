@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/matthijn/dragoman/internal/base"
-	"github.com/matthijn/dragoman/internal/catalog"
-	"github.com/matthijn/dragoman/internal/core"
-	"github.com/matthijn/dragoman/internal/transport/pipe"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/catalog"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/transport/pipe"
 )
 
 // recorded is a real executor reading a response captured from a live backend.

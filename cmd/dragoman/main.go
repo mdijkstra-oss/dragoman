@@ -17,12 +17,12 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/matthijn/dragoman/internal/catalog"
-	"github.com/matthijn/dragoman/internal/config"
-	"github.com/matthijn/dragoman/internal/core"
-	"github.com/matthijn/dragoman/internal/dialect/openairesponses"
-	"github.com/matthijn/dragoman/internal/transport/pipe"
-	"github.com/matthijn/dragoman/internal/transport/serve"
+	"github.com/mdijkstra-oss/dragoman/internal/catalog"
+	"github.com/mdijkstra-oss/dragoman/internal/config"
+	"github.com/mdijkstra-oss/dragoman/internal/core"
+	"github.com/mdijkstra-oss/dragoman/internal/dialect/openairesponses"
+	"github.com/mdijkstra-oss/dragoman/internal/transport/pipe"
+	"github.com/mdijkstra-oss/dragoman/internal/transport/serve"
 )
 
 // CLI is the command line. It owns argv parsing, reading and writing the

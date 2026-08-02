@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 // Options is what the caller settled before the core runs. Credentials are

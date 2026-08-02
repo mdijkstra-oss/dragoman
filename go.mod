@@ -1,4 +1,4 @@
-module github.com/matthijn/dragoman
+module github.com/mdijkstra-oss/dragoman
 
 go 1.25.1
 

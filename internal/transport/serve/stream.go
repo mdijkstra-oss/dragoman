@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 // stream frames the event sequence as server-sent events. The payload is the

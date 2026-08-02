@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matthijn/dragoman/internal/base"
+	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
 // waitDelay bounds how long Wait may spend on a child that was killed but left
