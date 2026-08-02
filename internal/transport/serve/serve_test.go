@@ -925,7 +925,8 @@ func modelOf(t *testing.T, body []byte) string {
 }
 
 // dataPayloads reads a server-sent event stream back into the payloads it
-// carries, rejecting any framing beyond one data line closed by a blank line.
+// carries, rejecting any framing beyond one event line and one data line closed
+// by a blank line.
 func dataPayloads(t *testing.T, stream string) []string {
 	t.Helper()
 	payloads := []string{}
@@ -933,16 +934,40 @@ func dataPayloads(t *testing.T, stream string) []string {
 		if event == "" {
 			continue
 		}
-		payload, framed := strings.CutPrefix(event, "data: ")
+		head, tail, split := strings.Cut(event, "\n")
+		if !split {
+			t.Fatalf("event carries no data line: %q", event)
+		}
+		name, named := strings.CutPrefix(head, "event: ")
+		if !named {
+			t.Fatalf("event is not introduced by an event line: %q", event)
+		}
+		payload, framed := strings.CutPrefix(tail, "data: ")
 		if !framed {
 			t.Fatalf("event is not a data line: %q", event)
 		}
 		if strings.Contains(payload, "\n") {
 			t.Fatalf("event is not terminated by a blank line: %q", event)
 		}
+		if typed := typeOf(t, payload); typed != name {
+			t.Fatalf("event line names %q, payload names %q", name, typed)
+		}
 		payloads = append(payloads, payload)
 	}
 	return payloads
+}
+
+// typeOf reads the type a payload names. The event line has to agree with it,
+// or a client is handed two answers to which event it just received.
+func typeOf(t *testing.T, payload string) string {
+	t.Helper()
+	var named struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(payload), &named); err != nil {
+		t.Fatalf("payload is not JSON: %v", err)
+	}
+	return named.Type
 }
 
 func assertResponseBody(t *testing.T, body string) {

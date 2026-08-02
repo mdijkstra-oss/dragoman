@@ -8,8 +8,10 @@ import (
 )
 
 // stream frames the event sequence as server-sent events. The payload is the
-// line the pipe writes as NDJSON and nothing is added to it but "data: " and a
-// blank line, which is how framing stays free of fidelity.
+// line the pipe writes as NDJSON, introduced by an event line naming its type
+// and closed by a blank line, which is the framing the Responses format
+// specifies. A client that dispatches on the event name reads the same stream
+// as one that dispatches on the type inside the payload.
 type stream struct {
 	writer  http.ResponseWriter
 	control *http.ResponseController
@@ -36,7 +38,7 @@ func (s *stream) Send(event base.Event) error {
 		return err
 	}
 	s.begin()
-	if _, err := s.writer.Write(frame(encoded)); err != nil {
+	if _, err := s.writer.Write(frame(event.Type, encoded)); err != nil {
 		return err
 	}
 	s.remember(event)
@@ -100,11 +102,20 @@ func (s *stream) flush() error {
 	return nil
 }
 
-func frame(payload []byte) []byte {
-	framed := make([]byte, 0, len(dataPrefix)+len(payload)+2)
+// The event line repeats what the payload's own type field already says. Both
+// are required: the name is what an SSE client dispatches on before parsing
+// anything, and the field is what survives a client that ignores framing.
+func frame(name base.EventType, payload []byte) []byte {
+	framed := make([]byte, 0, len(eventPrefix)+len(name)+len(dataPrefix)+len(payload)+3)
+	framed = append(framed, eventPrefix...)
+	framed = append(framed, name...)
+	framed = append(framed, '\n')
 	framed = append(framed, dataPrefix...)
 	framed = append(framed, payload...)
 	return append(framed, '\n', '\n')
 }
 
-const dataPrefix = "data: "
+const (
+	eventPrefix = "event: "
+	dataPrefix  = "data: "
+)
