@@ -31,6 +31,14 @@ type Sink func(base.Event) error
 
 type Result struct {
 	Response *base.Response
+
+	// Usage is what the exchange cost, whichever framing the caller asked for.
+	// A streamed answer is delivered as events and leaves no response body
+	// behind, so a caller reading the counts off the response would find them
+	// only on the requests that did not stream — and the numbers are the same
+	// numbers either way.
+	Usage *base.Usage
+
 	Drops    []base.Drop
 	Sent     json.RawMessage
 	Received json.RawMessage
@@ -188,6 +196,7 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 		return result, Fail(ExitUsage, "%s", err)
 	}
 	folded = base.AsFormattedText(folded, req)
+	result.Usage = folded.Usage
 	result.Drops = base.MergeDrops(result.Drops, base.Classify(round.Drops, spoken.DropTable))
 	if opts.Strict && len(result.Drops) > 0 {
 		return result, Fail(ExitUsage, "strict: %d field(s) dropped:\n%s",

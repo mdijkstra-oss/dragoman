@@ -144,13 +144,20 @@ func serveCommand(cli ServeCmd) int {
 	if err != nil {
 		return fail(err)
 	}
+	logged, err := serve.LoggedHeaders()
+	if err != nil {
+		return fail(err)
+	}
+	// JSON, because the accounting line is the thing a deployment aggregates,
+	// and a format only a human reads is a format nothing counts.
+	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	handler := serve.New(serve.Config{
-		Catalog: known,
-		Strict:  cli.Strict,
-		Log:     slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Catalog:    known,
+		Strict:     cli.Strict,
+		Log:        log,
+		LogHeaders: logged,
 	})
-	fmt.Fprintf(os.Stderr, "dragoman: serving %s on %s\n",
-		strings.Join(names(known), ", "), cli.Addr)
+	log.Info("serving", "services", names(known), "addr", cli.Addr)
 
 	// No write timeout: an answer may legitimately run long, and a deadline
 	// here would truncate a stream the caller is still reading.

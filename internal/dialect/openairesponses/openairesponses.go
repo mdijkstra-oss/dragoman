@@ -1,5 +1,5 @@
 // Package openairesponses speaks the dialect the base is written in. Encoding
-// is therefore a pass-through with the flag overrides applied, and decoding
+// is therefore the arriving body with the overrides applied to it, and decoding
 // recognises the grammar the emitter itself produces.
 package openairesponses
 
@@ -62,8 +62,10 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 			return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", Name, err)
 		}
 	}
-	// The body the caller sent is the body the backend receives, so nothing
-	// the base did not model is lost on this edge.
+	// The body the backend receives is the body the caller sent with the
+	// overrides written onto it, so nothing the base did not model is lost on
+	// this edge: an override moves the top-level key order and touches no
+	// value it did not name.
 	return dialect.Encoded{Body: body}, nil
 }
 

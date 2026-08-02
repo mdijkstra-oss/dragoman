@@ -32,9 +32,9 @@ type Request struct {
 	PromptCacheOptions *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 
 	// Raw is the body exactly as it arrived. The openai-responses backend
-	// passes it through unchanged when no flag overrides it, which is what
-	// makes that path a faithful pass-through, and the dropped-field diff is
-	// computed against it.
+	// encodes from these bytes rather than from the typed fields, which is what
+	// keeps a field this base does not model on that path, and the
+	// dropped-field diff is computed against it.
 	Raw json.RawMessage `json:"-"`
 }
 

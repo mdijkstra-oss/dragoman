@@ -92,9 +92,10 @@ answer to what this instance serves. The consequence to accept is that a config
 naming one service serves exactly that one; `dragoman config` prints the
 embedded table for exactly that reason, to be copied and edited.
 
-`--backend` on the pipe and `/<service>/responses` on the listener resolve the
-same name from the same table, so a service added once is served by both. Two
-tables would drift, and the one that drifted would be the one not under test.
+`--backend` on the pipe and the first segment of `model` on the listener resolve
+the same name from the same table, so a service added once is served by both.
+Two tables would drift, and the one that drifted would be the one not under
+test.
 
 A table naming a protocol dragoman does not speak, or a service missing
 `endpoint` or `auth`, fails at load: exit `2`, dragoman could not run. **An unset
@@ -134,8 +135,8 @@ dragoman --backend claude-cli --model sonnet < request.json
 ```
 
 It is a row of the same table as every other service, so the listener serves it
-too — `POST /claude-cli/responses` reaches the same backend the pipe does, and
-`GET /services` reports it with an empty `auth`.
+too — a request naming `claude-cli/sonnet` as its model reaches the same backend
+the pipe does, and `GET /services` reports it with an empty `auth`.
 
 `--backend claude-cli` is sugar for `--backend-protocol anthropic-messages
 --endpoint exec:claude`, and the `exec:` scheme is what selects a process. The
@@ -233,16 +234,24 @@ dragoman serve --addr 127.0.0.1:8080 --config ./dragoman.yaml
 
 | route | purpose |
 |---|---|
-| `POST /<service>/responses` | the path segment is a key in the service table; the body is an unmodified `openai-responses` request |
+| `POST /responses` | an `openai-responses` request whose `model` names its service first: `openai/gpt-5.5` |
 | `GET /services` | the table as JSON — name, protocol, endpoint, and the variable each needs. Never a key, and never whether one is set |
 | `GET /health` | liveness only |
 
-Nothing about a request is configured out of band. `model`, `reasoning.effort`,
-`max_output_tokens`, `stream`, `tools`, `tool_choice`, `text.format` and
-`instructions` already travel in the body, so the surface is one path segment
-rather than a flag set per route. `--config` and `--strict` are the only other
-things a listener settles, and both apply to every request it serves. An
-application changes provider by changing a path segment.
+**The service is the first segment of `model`, split on the first `/` only.**
+`openai/gpt-5.5` reaches `openai` with `gpt-5.5` on the forwarded body, and
+`openrouter/anthropic/claude-3` reaches `openrouter` with `anthropic/claude-3`,
+because a provider whose own identifiers are paths has to stay addressable. A
+model with no service, or one naming a service this instance does not serve, is
+a `404` listing what it does. Prefixing the model is how OpenRouter spells the
+same idea, so a client already writing one needs no field it does not have.
+
+Nothing about a request is configured out of band, and there is nothing in the
+URL to configure: `model`, `reasoning.effort`, `max_output_tokens`, `stream`,
+`tools`, `tool_choice`, `text.format` and `instructions` all travel in the body,
+so one base URL is a client's whole integration surface. `--config` and
+`--strict` are the only things a listener settles, and both apply to every
+request it serves. An application changes provider by changing a model name.
 
 `stream` is decided by the body exactly as on the pipe, and only the framing
 changes: a buffered request gets `application/json` and one Responses body, a
@@ -259,7 +268,7 @@ The exit codes below become status codes:
 | code | HTTP | when |
 |---|---|---|
 | `2` | `400` | unparseable body, a required field with no source, a drop under `--strict` |
-| `2` | `404` | unknown service |
+| `2` | `404` | a `model` naming no service this instance serves |
 | `2` | `500` | the service's `auth` variable is unset |
 | `1` | the backend's own status | the backend refused |
 | `0` | `200` | translated |
@@ -272,6 +281,43 @@ arrived on a `200` becomes `502`. Failures are `openai-responses` error objects
 — a client that knows only this format has to be able to read them too. Once the
 first event of a stream is written the status line is already sent, so a
 mid-stream failure ends the stream as an event.
+
+## Accounting
+
+The listener logs JSON, and a request that worked is one line of it:
+
+```json
+{"time":"2026-07-31T12:04:11Z","level":"INFO","msg":"request served","service":"anthropic","model":"claude-4-6","status":200,"duration_ms":842,"input_tokens":516,"cached_tokens":0,"output_tokens":160,"reasoning_tokens":34,"total_tokens":676}
+```
+
+A translating proxy is the only thing that knows both which service answered and
+what the answer cost, so the record belongs here. The counts are the normalised
+ones — the same key means the same thing whichever provider answered — written
+whether the caller streamed or not, and at zero rather than absent when a backend
+reported none, because a line whose key set depends on who answered cannot be
+summed. `duration_ms` is dragoman's exchange with the backend, never a caller's
+view of its own request. A failed request writes the failure line and not this
+one.
+
+`LOG_REQUEST_HEADERS` copies request headers onto that line, which is how a
+caller in front of dragoman puts its own identity beside the cost — a request ID
+shared with its own log, a session, whichever agent it resolved:
+
+```sh
+LOG_REQUEST_HEADERS=X-Request-ID,X-Session-ID dragoman serve
+```
+
+**An allowlist, never a passthrough.** A request carrying fifty headers produces
+entries for the names configured here or nothing; unset records nothing at all.
+A name the request omits is left out rather than written empty. At most sixteen
+names, each canonicalizing to `X-*`, none containing a credential-like term
+(`auth`, `api-key`, `secret`, `password` among them) — a violation fails at
+load: exit `2`, naming the entry. An operator who can name any header to log can
+name the one carrying a key, and a key in a log is a key in every archive of it.
+
+A recorded value is a label. Dragoman performs no authentication, so a header
+naming a subject grants nothing, reaches no routing decision, and selects no
+credential.
 
 ## Provider state
 
@@ -337,7 +383,7 @@ would have been read from.
 |---|---|
 | `0` | a response was returned and translated |
 | `1` | the backend said no: HTTP 4xx/5xx, or a provider error body |
-| `2` | dragoman could not run: unparseable input, unknown dialect, a service table that will not load, unknown service, missing key, bad flags, a required field with no source, or a drop under `--strict` |
+| `2` | dragoman could not run: unparseable input, unknown dialect, a service table that will not load, a log-header allowlist that will not, unknown service, missing key, bad flags, a required field with no source, or a drop under `--strict` |
 
 `2` is reserved for "the tool could not run", which is the only thing that makes
 it trustworthy in a hook or a CI step. The same three classes are what the

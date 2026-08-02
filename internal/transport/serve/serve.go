@@ -1,6 +1,7 @@
 // Package serve is the HTTP transport. It owns what a listener adds and
-// nothing more: routing a service name out of the path, framing the answer as
-// one JSON body or as server-sent events, and mapping a failure to a status.
+// nothing more: resolving a service out of the model the body names, framing
+// the answer as one JSON body or as server-sent events, and mapping a failure
+// to a status.
 // Flag precedence, backend selection, translation and the dropped-field diff
 // are core concerns it hands over and never implements, which is what makes
 // this a sibling of the pipe rather than a second pipeline.
@@ -31,9 +32,15 @@ type Config struct {
 	Executor core.Executor
 	Strict   bool
 
-	// Log is where drops go. A nil logger discards them; it never turns them
-	// into part of the answer.
+	// Log carries what a request cost, what was dropped from it, and how it
+	// failed. None of it reaches the answer: a nil logger discards the lot and
+	// the caller reads the same body either way.
 	Log *slog.Logger
+
+	// LogHeaders is the allowlist of request headers the accounting line
+	// records, in the order they are written. Empty records none — see
+	// LoggedHeaders, which is where an operator's list becomes one.
+	LogHeaders []string
 }
 
 // Service is one row of GET /services. It names the variable a service needs
@@ -60,9 +67,10 @@ func New(cfg Config) http.Handler {
 		executor: cfg.Executor,
 		strict:   cfg.Strict,
 		log:      logger(cfg.Log),
+		headers:  cfg.LogHeaders,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/{service}/responses", listener.only(http.MethodPost, listener.translate))
+	mux.HandleFunc("/responses", listener.only(http.MethodPost, listener.translate))
 	mux.HandleFunc("/services", listener.only(http.MethodGet, listener.services))
 	mux.HandleFunc("/health", listener.only(http.MethodGet, health))
 	mux.HandleFunc("/", listener.unrouted)
@@ -74,16 +82,10 @@ type server struct {
 	executor core.Executor
 	strict   bool
 	log      *slog.Logger
+	headers  []string
 }
 
 func (s server) translate(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("service")
-	backend, served := s.catalog.Presets[name]
-	if !served {
-		s.fail(w, r, http.StatusNotFound, fmt.Sprintf("unknown service %q; this instance serves: %s",
-			name, strings.Join(serviceNames(s.catalog.Presets), ", ")))
-		return
-	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		s.fail(w, r, http.StatusBadRequest, fmt.Sprintf("reading request body: %s", err))
@@ -94,16 +96,26 @@ func (s server) translate(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
+	named := base.GetModel(req)
+	service, model, addressed := address(named)
+	backend, served := s.catalog.Presets[service]
+	if !addressed || !served {
+		s.fail(w, r, http.StatusNotFound, fmt.Sprintf(
+			"cannot resolve a service from model %q; a model names its service as its first "+
+				"segment, and this instance serves: %s",
+			named, strings.Join(serviceNames(s.catalog.Presets), ", ")))
+		return
+	}
 	if !hasCredential(backend) {
 		s.fail(w, r, http.StatusInternalServerError,
-			fmt.Sprintf("service %q is unavailable: %s is not set", name, backend.KeyEnv))
+			fmt.Sprintf("service %q is unavailable: %s is not set", service, backend.KeyEnv))
 		return
 	}
 
-	// The body already carries model, effort, cap and stream, so the path
-	// segment plus the server-wide strict flag is the whole of what the
-	// listener settles.
-	opts := core.Options{Preset: name, Strict: s.strict}
+	// The body already carries effort, cap and stream, so the pair the model
+	// was read apart into, plus the server-wide strict flag, is the whole of
+	// what the listener settles.
+	opts := core.Options{Preset: service, Model: model, Strict: s.strict}
 	clearWriteDeadline(w)
 	if core.WantsEvents(req, opts) {
 		s.streamed(w, r, opts, body)
@@ -113,7 +125,9 @@ func (s server) translate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s server) buffered(w http.ResponseWriter, r *http.Request, opts core.Options, body []byte) {
+	started := time.Now()
 	result, err := core.Run(r.Context(), s.catalog, opts, body, s.executor, nil)
+	elapsed := time.Since(started)
 	s.record(opts.Preset, result.Drops)
 	if err != nil {
 		s.fail(w, r, statusOf(err), err.Error())
@@ -125,13 +139,17 @@ func (s server) buffered(w http.ResponseWriter, r *http.Request, opts core.Optio
 		return
 	}
 	writeJSON(w, http.StatusOK, encoded)
+	s.served(r, opts, http.StatusOK, elapsed, result.Usage)
 }
 
 func (s server) streamed(w http.ResponseWriter, r *http.Request, opts core.Options, body []byte) {
 	events := newStream(w)
+	started := time.Now()
 	result, err := core.Run(r.Context(), s.catalog, opts, body, s.executor, events.Send)
+	elapsed := time.Since(started)
 	s.record(opts.Preset, result.Drops)
 	if err == nil {
+		s.served(r, opts, http.StatusOK, elapsed, result.Usage)
 		return
 	}
 	// The status line went out with the first event, so what is left to say has
@@ -150,7 +168,19 @@ func (s server) services(w http.ResponseWriter, _ *http.Request) {
 
 func (s server) unrouted(w http.ResponseWriter, r *http.Request) {
 	s.fail(w, r, http.StatusNotFound, fmt.Sprintf("no route for %s; this instance serves "+
-		"POST /<service>/responses, GET /services and GET /health", r.URL.Path))
+		"POST /responses, GET /services and GET /health", r.URL.Path))
+}
+
+// address reads the service off the front of a model and returns the name the
+// backend is to be asked for. The split is on the first slash only, so a
+// provider whose own identifiers are paths — openrouter spells one
+// anthropic/claude-3 — keeps its identifier whole behind the service serving
+// it. Both halves have to be there: a name that is all service or all model
+// addresses nothing, and forwarding it would send the segment upstream as part
+// of the model.
+func address(named string) (service, model string, addressed bool) {
+	service, model, split := strings.Cut(named, "/")
+	return service, model, split && service != "" && model != ""
 }
 
 func health(w http.ResponseWriter, _ *http.Request) {
@@ -183,6 +213,53 @@ func (s server) record(service string, drops []base.Drop) {
 	}
 	if len(inert) > 0 {
 		s.log.Debug("dropped fields", "service", service, "drops", inert)
+	}
+}
+
+// served is the accounting line: one record per request that worked, written
+// where the money was spent. A translating proxy is the only place that knows
+// both which service answered and what the answer cost, and a caller in front
+// of it can log what it served without being able to say either.
+//
+// The duration is dragoman's exchange with the backend — translation, the call,
+// and the decode — and not the caller's view of its own request, which includes
+// a network hop dragoman cannot see.
+func (s server) served(r *http.Request, opts core.Options, status int, elapsed time.Duration, usage *base.Usage) {
+	fields := []any{
+		"service", opts.Preset,
+		"model", opts.Model,
+		"status", status,
+		"duration_ms", elapsed.Milliseconds(),
+	}
+	fields = append(fields, tokenCounts(usage)...)
+	if headers := loggedHeaders(r.Header, s.headers); len(headers) > 0 {
+		fields = append(fields, slog.GroupAttrs("headers", headers...))
+	}
+	s.log.Log(r.Context(), slog.LevelInfo, "request served", fields...)
+}
+
+// tokenCounts flattens the usage record into fields. The details hang off
+// pointers a backend that reported none leaves nil, and every count is written
+// anyway, at zero: a record whose key set depends on which provider answered
+// cannot be summed across a day of them.
+func tokenCounts(usage *base.Usage) []any {
+	counted := base.Usage{}
+	if usage != nil {
+		counted = *usage
+	}
+	cached, reasoning := 0, 0
+	if counted.InputTokenDetails != nil {
+		cached = counted.InputTokenDetails.CachedTokens
+	}
+	if counted.OutputTokenDetails != nil {
+		reasoning = counted.OutputTokenDetails.ReasoningTokens
+	}
+	return []any{
+		"input_tokens", counted.InputTokens,
+		"cached_tokens", cached,
+		"output_tokens", counted.OutputTokens,
+		"reasoning_tokens", reasoning,
+		"total_tokens", counted.TotalTokens,
 	}
 }
 
