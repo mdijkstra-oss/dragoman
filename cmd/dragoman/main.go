@@ -31,6 +31,7 @@ type CLI struct {
 	Translate TranslateCmd `cmd:"" default:"withargs" help:"Translate one request from stdin to stdout."`
 	Serve     ServeCmd     `cmd:"" help:"Serve the service table over HTTP."`
 	Config    ConfigCmd    `cmd:"" help:"Print the service table this binary would serve."`
+	Health    HealthCmd    `cmd:"" name:"healthcheck" help:"Report whether a listener is serving."`
 }
 
 // TranslateCmd is the original command line, unchanged: it stays the default so
@@ -67,6 +68,18 @@ type ServeCmd struct {
 	Strict     bool   `help:"Treat any dropped field as an error, for every request served."`
 }
 
+// HealthCmd lets the binary check itself. A container built on scratch holds one
+// file and no shell, so a runtime healthcheck naming any other command names one
+// the image cannot execute — and a deployment that cannot gate on readiness sends
+// its first requests to a process that has not finished binding.
+//
+// It asks only whether this process is serving. Reaching a provider is deliberately
+// not part of the answer: an instance that reports itself unhealthy when a backend
+// is having a bad afternoon gets restarted for someone else's outage.
+type HealthCmd struct {
+	Addr string `help:"Address to check." default:"127.0.0.1:8080"`
+}
+
 type ConfigCmd struct {
 	ConfigFile string `help:"Print this table instead of the built-in one." name:"config" type:"path"`
 }
@@ -101,6 +114,8 @@ func run() int {
 		return serveCommand(cli.Serve)
 	case "config":
 		return configCommand(cli.Config)
+	case "healthcheck":
+		return healthCommand(cli.Health)
 	default:
 		return translateCommand(cli.Translate)
 	}
@@ -175,6 +190,36 @@ func names(known core.Catalog) []string {
 	}
 	sort.Strings(served)
 	return served
+}
+
+// healthCommand asks the liveness route the question a runtime asks, and answers in
+// the only vocabulary a runtime reads: the exit code. The timeout is short because
+// the question is whether a listener answers, not whether it answers quickly.
+func healthCommand(cli HealthCmd) int {
+	client := &http.Client{Timeout: healthTimeout}
+	response, err := client.Get("http://" + cli.Addr + "/health")
+	if err != nil {
+		return unhealthy(fmt.Errorf("reach %s: %w", cli.Addr, err))
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return unhealthy(fmt.Errorf("%s answered %s", cli.Addr, response.Status))
+	}
+	return int(core.ExitOK)
+}
+
+// healthTimeout is short because the question is whether a listener answers, not
+// whether it answers quickly. A check that outlasts the interval it runs on stops
+// reporting the state it was asked about.
+const healthTimeout = 2 * time.Second
+
+// unhealthy answers in the only vocabulary a container runtime reads. The code is
+// neither of dragoman's own: a listener that is not up is not a usage error, and
+// nothing here asked a backend anything. One is what every runtime reads as
+// unhealthy, and the only value that has ever meant it.
+func unhealthy(err error) int {
+	fmt.Fprintf(os.Stderr, "dragoman: %s\n", err)
+	return 1
 }
 
 func configCommand(cli ConfigCmd) int {

@@ -1,6 +1,9 @@
 package main_test
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,4 +79,60 @@ func TestNoExecuteNeedsNoCredential(t *testing.T) {
 	if !strings.Contains(string(output), `"user_input"`) {
 		t.Errorf("translation missing: %s", output)
 	}
+}
+
+// TestHealthcheck covers the one exit code a container runtime reads. Zero is the
+// only value that means healthy and one is the only value that has ever meant
+// unhealthy, so the usage code dragoman reserves for its own failures must not
+// escape through this command.
+func TestHealthcheck(t *testing.T) {
+	command := binary(t)
+	serving := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Errorf("path = %q, want /health", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer serving.Close()
+
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer refusing.Close()
+
+	silent := httptest.NewServer(http.NotFoundHandler())
+	unreachable := address(silent.URL)
+	silent.Close()
+
+	cases := []struct {
+		name string
+		addr string
+		want int
+	}{
+		{name: "a serving listener is healthy", addr: address(serving.URL), want: 0},
+		{name: "a listener answering anything else is unhealthy", addr: address(refusing.URL), want: 1},
+		{name: "nothing listening is unhealthy", addr: unreachable, want: 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			run := exec.Command(command, "healthcheck", "--addr", test.addr)
+			run.Stderr = &strings.Builder{}
+			if got := exitCodeOf(run.Run()); got != test.want {
+				t.Errorf("exit code = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func address(url string) string { return strings.TrimPrefix(url, "http://") }
+
+func exitCodeOf(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return -1
 }
