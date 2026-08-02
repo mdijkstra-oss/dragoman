@@ -138,6 +138,11 @@ func RawElements(data []byte, name string) []json.RawMessage {
 	return elements
 }
 
+// TextGap is what JoinText puts between two runs. It is named because a dialect
+// forced to keep those runs as separate parts has to materialise the gap rather
+// than lose the blank line the model reads.
+const TextGap = "\n\n"
+
 // JoinText folds a second run of text onto an existing one, for the dialects
 // that keep instructions or a turn's prose in a single field.
 func JoinText(existing, addition string) string {
@@ -147,5 +152,5 @@ func JoinText(existing, addition string) string {
 	if addition == "" {
 		return existing
 	}
-	return existing + "\n\n" + addition
+	return existing + TextGap + addition
 }

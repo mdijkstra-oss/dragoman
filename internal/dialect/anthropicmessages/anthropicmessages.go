@@ -50,6 +50,10 @@ func Dialect() dialect.Dialect {
 		DropTable: dialect.DropTable(map[string]base.DropReason{
 			"strict": base.DropUnsupported,
 			"name":   base.DropUnsupported,
+			// A cache_control has a type and a TTL and nothing that means
+			// OpenAI's mode, and no cache key of any kind.
+			"mode":             base.DropUnsupported,
+			"prompt_cache_key": base.DropUnsupported,
 		}),
 	}
 }
@@ -57,7 +61,7 @@ func Dialect() dialect.Dialect {
 var carries = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
-	"parallel_tool_calls",
+	"parallel_tool_calls", "prompt_cache_options",
 }
 
 func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
@@ -82,6 +86,8 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	}
 	body.System, body.Messages = system, messages
 	drops = append(drops, itemDrops...)
+	drops = append(drops, markerDrops(req.Input)...)
+	drops = append(drops, optionDrops(req.PromptCacheOptions, placedAny(body.Messages))...)
 
 	drops = append(drops, applyTools(&body, req, backend)...)
 
@@ -288,13 +294,14 @@ func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error)
 
 	drops, err := dialect.WalkItems(req.Input, dialect.Handlers{
 		Message: func(item base.Item) {
-			text := base.GetText(item)
 			role := turnRole(item)
 			if role == "" {
-				system = dialect.JoinText(system, text)
+				system = dialect.JoinText(system, base.GetText(item))
 				return
 			}
-			appendBlock(role, wireBlock{Type: "text", Text: text})
+			for _, block := range textBlocks(item, base.GetCacheTTL(req)) {
+				appendBlock(role, block)
+			}
 		},
 		Reasoning: func(item base.Item) {
 			// Whatever the backend returned as state goes back unaltered and
@@ -331,6 +338,108 @@ func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error)
 	return system, messages, drops, err
 }
 
+// textBlocks renders a message item's content. It is the one joined block it has
+// always been unless a part carries a cache breakpoint: cache_control sits on a
+// block, so marking the third of five parts means five blocks with the marker on
+// the third. Nothing is trimmed at four — the limit is this endpoint's to
+// enforce, and a fifth is forwarded so the refusal names it.
+func textBlocks(item base.Item, ttl *string) []wireBlock {
+	if !dialect.Marked(item.Content) {
+		return []wireBlock{{Type: "text", Text: base.GetText(item)}}
+	}
+	blocks := make([]wireBlock, 0, len(item.Content))
+	for _, part := range item.Content {
+		if part.Text == "" {
+			// A part carrying no text is left out, exactly as the joined form
+			// left it out. Spelling one out would mint a block nobody sent —
+			// this endpoint refuses an empty text block, so a marker elsewhere
+			// in the message would turn a request that worked into a 400, and a
+			// marker on this part would land the caller's prefix boundary on a
+			// block dragoman invented. What could not be placed is reported.
+			continue
+		}
+		block := wireBlock{Type: "text", Text: part.Text}
+		if part.Marks() {
+			// The TTL is request-wide at the other end and per breakpoint here,
+			// so the one value fans out onto every marker. Absent stays absent:
+			// a type alone gets this endpoint's own default, which is why
+			// spelling out a 30m is refused where omitting it succeeds.
+			block.CacheControl = &wireCacheControl{Type: "ephemeral", TTL: ttl}
+		}
+		blocks = append(blocks, block)
+	}
+	if len(blocks) == 0 {
+		return []wireBlock{{Type: "text", Text: base.GetText(item)}}
+	}
+	return blocks
+}
+
+// markerDrops reports what a cache_control could not carry from each breakpoint
+// the caller placed. The marker's presence is the whole of what travels, so the
+// bytes inside it are diffed away rather than listed by hand, and a mode arrives
+// as a path the caller can find.
+func markerDrops(items []base.Item) []base.Drop {
+	drops := []base.Drop{}
+	for index, item := range items {
+		for position, part := range item.Content {
+			if !part.Marks() {
+				continue
+			}
+			path := dialect.MarkerPath(index, position)
+			if part.Text == "" {
+				// A cache_control rides on a text block, and this part has no
+				// text to make one out of. The marker is the caller's spending
+				// decision, so it is named rather than moved onto a neighbour.
+				drops = append(drops, base.Drop{Path: path, Reason: base.DropUnsupported,
+					Detail: Name + " marks a text block, and this part carries no text"})
+				continue
+			}
+			if turnRole(item) == "" {
+				// The item feeds the system prompt, which this dialect keeps as
+				// one string. Marking a system block is expressible here and not
+				// in the base, so once the text is folded in there is no block
+				// left to put a marker on.
+				drops = append(drops, base.Drop{Path: path, Reason: base.DropUnimplemented,
+					Detail: Name + " keeps instructions in system, which carries no block to mark"})
+				continue
+			}
+			drops = append(drops, dialect.ShapeDrops(part.PromptCacheBreakpoint, struct{}{}, path)...)
+		}
+	}
+	return drops
+}
+
+// placedAny reports whether a cache_control reached the wire, which is the only
+// thing that makes the request-wide TTL a value this dialect carried.
+func placedAny(messages []wireMessage) bool {
+	for _, message := range messages {
+		for _, block := range message.Content {
+			if block.CacheControl != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// optionDrops reports what a cache_control could not carry from the request-wide
+// options. Only the TTL travels, and only onto a marker that was placed: a TTL
+// on a request that marked nothing is a value the caller sent and the wire never
+// saw, so claiming it as consumed would leave --strict calling that run clean.
+// Whatever else arrived is named by the diff rather than by a list kept here.
+func optionDrops(options *base.PromptCacheOptions, placed bool) []base.Drop {
+	if options == nil {
+		return nil
+	}
+	carried := struct {
+		TTL *string `json:"ttl,omitempty"`
+	}{}
+	if placed {
+		carried.TTL = options.TTL
+	}
+	return dialect.ShapeDrops(options.Raw, carried, "prompt_cache_options")
+}
+
 // toolChoice maps the base's choice, and carries the parallel-call setting
 // that this dialect keeps on the same object. A request that only disables
 // parallel calls still needs a choice to hang it from.
@@ -353,12 +462,13 @@ func toolChoice(req base.Request) *wireToolChoice {
 	return choice
 }
 
-// decodeState holds what is bounded by one message: the input token count seen
+// decodeState holds what is bounded by one message: the input token counts seen
 // at message_start, which the terminal frame has to be combined with because
 // the two halves of usage arrive on different frames.
 type decodeState struct {
-	InputTokens  int
-	CachedTokens int
+	InputTokens   int
+	CachedTokens  int
+	WrittenTokens int
 }
 
 func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.Recognised, error) {
@@ -391,6 +501,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		if usage := event.Message.Usage; usage != nil {
 			next.InputTokens = usage.InputTokens
 			next.CachedTokens = usage.CacheReadInputTokens
+			next.WrittenTokens = usage.CacheCreationInputTokens
 		}
 		return next, dialect.Recognised{
 			Pieces: []base.Piece{base.Start(event.Message.ID, event.Message.Model, 0)},
@@ -423,7 +534,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		if usage := event.Usage; usage != nil {
 			pieces = append(pieces, base.UsagePiece(base.CountUsage(
 				current.InputTokens, usage.OutputTokens,
-				usage.Details.ThinkingTokens, current.CachedTokens)))
+				usage.Details.ThinkingTokens, current.CachedTokens, current.WrittenTokens)))
 		}
 		if event.Delta != nil {
 			pieces = append(pieces, dialect.Outcome(event.Delta.StopReason, stopReasons))
@@ -460,7 +571,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	if usage := message.Usage; usage != nil {
 		pieces = append(pieces, base.UsagePiece(base.CountUsage(
 			usage.InputTokens, usage.OutputTokens,
-			usage.Details.ThinkingTokens, usage.CacheReadInputTokens)))
+			usage.Details.ThinkingTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)))
 	}
 	pieces = append(pieces, dialect.Outcome(message.StopReason, stopReasons))
 
@@ -592,10 +703,23 @@ type wireBlock struct {
 	// Caller rides on every tool_use block. Modelling it keeps it out of the
 	// drop diff on every single tool call; it is optional on the way back.
 	Caller *wireCaller `json:"caller,omitempty"`
+
+	// CacheControl is this dialect's breakpoint, placed on the block the caller
+	// marked. Never on one it did not: a breakpoint is a spending decision.
+	CacheControl *wireCacheControl `json:"cache_control,omitempty"`
 }
 
 type wireCaller struct {
 	Type string `json:"type"`
+}
+
+// wireCacheControl marks a block as the end of a cacheable prefix. The TTL is
+// placed verbatim, and this endpoint takes only 5m and 1h: a 30m is forwarded so
+// the refusal names the field, because converting it would be dragoman choosing
+// a price. Absent stays absent, leaving the endpoint's own default.
+type wireCacheControl struct {
+	Type string  `json:"type"`
+	TTL  *string `json:"ttl,omitempty"`
 }
 
 // MarshalJSON emits only the fields that belong to a block's type. A thinking
@@ -612,10 +736,14 @@ func (b wireBlock) MarshalJSON() ([]byte, error) {
 
 var blockShapes = map[string]func(wireBlock) any{
 	"text": func(b wireBlock) any {
+		// The marker is omitted when there is none, which is what keeps a
+		// request with no breakpoint byte-identical to one built before they
+		// existed.
 		return struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}{b.Type, b.Text}
+			Type         string            `json:"type"`
+			Text         string            `json:"text"`
+			CacheControl *wireCacheControl `json:"cache_control,omitempty"`
+		}{b.Type, b.Text, b.CacheControl}
 	},
 	"thinking": func(b wireBlock) any {
 		return struct {
@@ -693,7 +821,11 @@ type wireUsage struct {
 	InputTokens          int `json:"input_tokens"`
 	OutputTokens         int `json:"output_tokens"`
 	CacheReadInputTokens int `json:"cache_read_input_tokens"`
-	Details              struct {
+	// CacheCreationInputTokens is the flat total. This endpoint also splits the
+	// writes by TTL bucket under cache_creation; the base reads the total and
+	// not the buckets — one field, one meaning, and no arithmetic.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	Details                  struct {
 		ThinkingTokens int `json:"thinking_tokens"`
 	} `json:"output_tokens_details"`
 }

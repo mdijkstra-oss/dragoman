@@ -47,6 +47,12 @@ func Dialect() dialect.Dialect {
 		BodyPieces:   bodyPieces,
 		DropTable: dialect.DropTable(map[string]base.DropReason{
 			"strict": base.DropUnsupported,
+			// There is no inline caching field here at all, and both routes that
+			// would stand in for one are stateful — CachedContent on the legacy
+			// API, or a previous interaction id. A stateless proxy reaches
+			// neither, so the drop is permanent rather than pending.
+			"prompt_cache_key":     base.DropUnsupported,
+			"prompt_cache_options": base.DropUnsupported,
 		}),
 	}
 }
@@ -68,6 +74,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	drops = append(drops, itemDrops...)
+	drops = append(drops, markerDrops(req.Input)...)
 
 	body := wireRequest{Model: base.GetModel(req), Input: steps, Stream: stream}
 	if system != "" {
@@ -204,6 +211,26 @@ func buildSteps(req base.Request) ([]wireStep, string, []base.Drop, error) {
 		},
 	})
 	return steps, system, drops, err
+}
+
+// markerDrops reports every cache breakpoint the caller placed. This dialect has
+// no inline field for one, and the caller is told rather than left paying full
+// price on a request they marked.
+func markerDrops(items []base.Item) []base.Drop {
+	drops := []base.Drop{}
+	for index, item := range items {
+		for position, part := range item.Content {
+			if !part.Marks() {
+				continue
+			}
+			drops = append(drops, base.Drop{
+				Path:   dialect.MarkerPath(index, position),
+				Reason: base.DropUnsupported,
+				Detail: Name + " has no cache breakpoint, and both of its caching routes are stateful",
+			})
+		}
+	}
+	return drops
 }
 
 // callNames indexes tool-call names by call identity, because a result must
@@ -413,12 +440,15 @@ func outcomePieces(interaction wireInteraction) []base.Piece {
 	pieces := []base.Piece{}
 	if usage := interaction.Usage; usage != nil {
 		// The answer and the thinking arrive as siblings here; Responses counts
-		// the thinking inside the output, so they are added.
+		// the thinking inside the output, so they are added. The trailing zero is
+		// a write count this API does not report — it names only what a read
+		// saved, which is the same silence a caller gets for marking a request
+		// against it at all.
 		pieces = append(pieces, base.UsagePiece(base.CountUsage(
 			usage.TotalInputTokens,
 			usage.TotalOutputTokens+usage.TotalThoughtTokens,
 			usage.TotalThoughtTokens,
-			usage.TotalCachedTokens)))
+			usage.TotalCachedTokens, 0)))
 	}
 	return append(pieces, dialect.Outcome(interaction.Status, terminalStatuses))
 }

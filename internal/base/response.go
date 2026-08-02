@@ -102,9 +102,13 @@ type Usage struct {
 }
 
 // InputDetails names the part of the input the provider did not have to read
-// again.
+// again, and the part it had to write into the cache to get there. The write
+// count is the instrument: without it a cached_tokens of 0 on a first request
+// means either the marker did nothing or the cache was just written, and those
+// are opposite outcomes. Costed nowhere — it is read off the wire and reported.
 type InputDetails struct {
-	CachedTokens int `json:"cached_tokens"`
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 // OutputDetail names the part of the output that was reasoning. It is a subset
@@ -116,14 +120,19 @@ type OutputDetail struct {
 // CountUsage assembles a usage record in the base's shape. Reasoning is
 // counted inside the output, and the total is the two sides added, so a caller
 // can do arithmetic on these fields whichever backend answered.
-func CountUsage(input, output, reasoning, cached int) *Usage {
+//
+// A write with nothing read is the first half of a caching exchange and reports
+// cached_tokens: 0, so the details have to exist for either count rather than
+// for the read alone. Each provider spells both somewhere different and one
+// reports no write at all; whichever arrived lands here.
+func CountUsage(input, output, reasoning, cached, written int) *Usage {
 	usage := &Usage{
 		InputTokens:  input,
 		OutputTokens: output,
 		TotalTokens:  input + output,
 	}
-	if cached > 0 {
-		usage.InputTokenDetails = &InputDetails{CachedTokens: cached}
+	if cached > 0 || written > 0 {
+		usage.InputTokenDetails = &InputDetails{CachedTokens: cached, CacheWriteTokens: written}
 	}
 	if reasoning > 0 {
 		usage.OutputTokenDetails = &OutputDetail{ReasoningTokens: reasoning}

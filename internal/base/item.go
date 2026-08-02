@@ -63,6 +63,36 @@ type Item struct {
 type ContentPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+
+	// PromptCacheBreakpoint marks this part as the end of a prefix worth
+	// caching. It is carried as bytes rather than modelled because a decoder
+	// reads whether a breakpoint is present and never what its mode means: the
+	// dialects that spell the field OpenAI's way forward these bytes unchanged,
+	// and the one that spells it differently places its own marker and reports
+	// what it could not carry. dragoman never adds one — it is a spending
+	// decision, so this only ever holds what the caller sent.
+	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
+}
+
+// Marks reports whether the caller placed a breakpoint on this part. The
+// marker's wire shape is an object, so a null, a false, an empty string, an
+// empty array and an empty object all carry nothing — the same standard
+// carriesNothing applies to every other value in the drop diff, rather than a
+// narrower one that would make this field the exception. A client that
+// serialises its unset fields writes the key with null in it, and one that
+// models the flag as a boolean writes false to mean do not cache here; placing
+// a marker off either would be dragoman buying a cache write nobody asked for,
+// on the dialect with a four-block limit.
+//
+// Presence is the whole of what this answers. What is inside a marker is never
+// read, and the bytes still travel wherever the field exists, because refusing
+// a value the caller sent is the provider's job and not dragoman's.
+func (p ContentPart) Marks() bool {
+	var marker map[string]any
+	if json.Unmarshal(p.PromptCacheBreakpoint, &marker) != nil {
+		return false
+	}
+	return len(marker) > 0
 }
 
 func GetText(item Item) string {

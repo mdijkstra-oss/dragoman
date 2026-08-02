@@ -29,6 +29,11 @@ const (
 	callPrefix   = "call:"
 )
 
+// partText is what this dialect calls a text part, where the base calls it
+// input_text. The breakpoint riding on that part keeps its own name, which is
+// why carrying it costs no mapping code.
+const partText = "text"
+
 // variant is the whole of what the two formats disagree about. Everything else
 // — the encoder, both decoders, the drop table — is shared, because copying
 // them to change a field name is the N×M mistake this design exists to avoid.
@@ -76,7 +81,7 @@ func build(spoken variant) dialect.Dialect {
 var carries = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
-	"parallel_tool_calls",
+	"parallel_tool_calls", "prompt_cache_key", "prompt_cache_options",
 }
 
 func encode(spoken variant, req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
@@ -91,6 +96,7 @@ func encode(spoken variant, req base.Request, backend base.Backend, stream bool)
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", spoken.name, err)
 	}
 	drops = append(drops, itemDrops...)
+	drops = append(drops, markerDrops(req.Input)...)
 
 	body := map[string]any{"messages": messages, "stream": stream}
 	if model := base.GetModel(req); model != "" {
@@ -107,6 +113,16 @@ func encode(spoken variant, req base.Request, backend base.Backend, stream bool)
 	}
 	if req.ParallelToolCalls != nil {
 		body["parallel_tool_calls"] = *req.ParallelToolCalls
+	}
+	// Both caching fields are top-level and spelled the same at both ends, so
+	// they are placed rather than mapped. Whether the model behind this endpoint
+	// supports them is the provider's to answer: a 400 naming the field is a
+	// diagnosis, where a silent strip is a 200 at full price forever.
+	if key := req.PromptCacheKey; len(key) > 0 {
+		body["prompt_cache_key"] = key
+	}
+	if options := req.PromptCacheOptions; options != nil {
+		body["prompt_cache_options"] = options
 	}
 
 	tools, toolDrops := dialect.FunctionTools(req.Tools)
@@ -172,11 +188,11 @@ func buildMessages(req base.Request) ([]wireMessage, []base.Drop, error) {
 				role = base.RoleUser
 			}
 			if role != base.RoleAssistant {
-				messages = append(messages, wireMessage{Role: role, Content: text(base.GetText(item))})
+				messages = append(messages, wireMessage{Role: role, Content: contentOf(item)})
 				return
 			}
 			turn := assistant()
-			turn.Content = text(join(turn.Content, base.GetText(item)))
+			turn.Content = join(turn.Content, item)
 		},
 		Reasoning: func(item base.Item) {
 			// This dialect has no reasoning item of its own; the backends that
@@ -208,10 +224,79 @@ func buildMessages(req base.Request) ([]wireMessage, []base.Drop, error) {
 	return messages, drops, err
 }
 
-// join appends to a turn's existing text rather than replacing it, so a run of
-// assistant items keeps every one of them.
-func join(existing *content, addition string) string {
-	return dialect.JoinText(contentText(existing), addition)
+// contentOf renders an item's content, carrying each part's breakpoint. Whether
+// the parts reach the wire spelled out or folded into one string is content's
+// own decision; a part carrying nothing at all is left off entirely, exactly as
+// the joined form was before parts were kept.
+func contentOf(item base.Item) *content {
+	built := &content{}
+	for _, part := range item.Content {
+		if part.Text == "" {
+			// Spelled out, a part with no text would be a text block dragoman
+			// minted rather than one the caller sent — and a marker riding on
+			// it would move the caller's prefix boundary onto it. Left off, as
+			// the joined form always left it off; markerDrops names the marker.
+			continue
+		}
+		marker := json.RawMessage(nil)
+		if part.Marks() {
+			// Only a marker that carries something travels. A null or a false
+			// would otherwise force the spelled-out form for a caller who marked
+			// nothing, which is the one shape change this feature must not make;
+			// and there is nothing in it for the endpoint to refuse.
+			marker = part.PromptCacheBreakpoint
+		}
+		built.Parts = append(built.Parts, wirePart{
+			Type:       partText,
+			Text:       part.Text,
+			Breakpoint: marker,
+		})
+	}
+	if built.text() == "" && !marked(built.Parts) {
+		return nil
+	}
+	return built
+}
+
+// markerDrops names every breakpoint that had no text block to ride on. The
+// field is spelled the same at both ends, so a marker on a part that reaches the
+// wire needs no entry here — only one dragoman could not place does.
+func markerDrops(items []base.Item) []base.Drop {
+	drops := []base.Drop{}
+	for index, item := range items {
+		for position, part := range item.Content {
+			if part.Marks() && part.Text == "" {
+				drops = append(drops, base.Drop{
+					Path:   dialect.MarkerPath(index, position),
+					Reason: base.DropUnsupported,
+					Detail: "a breakpoint rides on a text part, and this part carries no text",
+				})
+			}
+		}
+	}
+	return drops
+}
+
+// join appends to a turn's existing content rather than replacing it, so a run
+// of assistant items keeps every one of them. The blank line between two of them
+// is text the model reads, so it rides on the part that follows rather than
+// going missing the moment a breakpoint forces the parts to be spelled out.
+func join(existing *content, item base.Item) *content {
+	addition := contentOf(item)
+	if existing == nil {
+		return addition
+	}
+	if addition == nil {
+		return existing
+	}
+	joined := &content{Parts: append([]wirePart(nil), existing.Parts...)}
+	for index, part := range addition.Parts {
+		if index == 0 && existing.text() != "" && addition.text() != "" {
+			part.Text = dialect.TextGap + part.Text
+		}
+		joined.Parts = append(joined.Parts, part)
+	}
+	return joined
 }
 
 func buildTools(tools []base.Tool) []wireTool {
@@ -411,7 +496,8 @@ var finishReasons = map[string]string{
 func usagePiece(usage *wireUsage) base.Piece {
 	return base.UsagePiece(base.CountUsage(
 		usage.PromptTokens, usage.CompletionTokens,
-		usage.CompletionDetails.ReasoningTokens, usage.PromptDetails.CachedTokens))
+		usage.CompletionDetails.ReasoningTokens,
+		usage.PromptDetails.CachedTokens, usage.PromptDetails.CacheWriteTokens))
 }
 
 func callKey(index int) string { return callPrefix + strconv.Itoa(index) }
@@ -420,13 +506,27 @@ func text(value string) *content {
 	if value == "" {
 		return nil
 	}
-	rendered := content(value)
-	return &rendered
+	return &content{Parts: []wirePart{{Type: partText, Text: value}}}
 }
 
-// content is a message body, which arrives as a string, as null, or as an
-// array of parts depending on the endpoint.
-type content string
+// content is a message body, which arrives as a string, as null, or as an array
+// of parts depending on the endpoint. It holds the parts either way and renders
+// as the bare string this dialect has always sent, spelling them out only when
+// one of them carries a cache breakpoint: the marker lives on a part, and a body
+// with none has to be byte-identical to what it was before breakpoints existed.
+type content struct {
+	Parts []wirePart
+}
+
+// text is the parts concatenated, which is the same bytes the array form
+// carries: the gap between two collapsed items rides on the part before it.
+func (c content) text() string {
+	var joined strings.Builder
+	for _, part := range c.Parts {
+		joined.WriteString(part.Text)
+	}
+	return joined.String()
+}
 
 // contentText reads a message body that may be absent. A null content leaves
 // the pointer nil without ever reaching UnmarshalJSON, which is what every
@@ -435,34 +535,53 @@ func contentText(body *content) string {
 	if body == nil {
 		return ""
 	}
-	return string(*body)
+	return body.text()
+}
+
+// marked reports whether any part carries a breakpoint, which is the one thing
+// that forces the array form.
+func marked(parts []wirePart) bool {
+	for _, part := range parts {
+		if len(part.Breakpoint) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *content) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" {
-		*c = ""
+		*c = content{}
 		return nil
 	}
 	var plain string
 	if err := json.Unmarshal(data, &plain); err == nil {
-		*c = content(plain)
+		*c = content{Parts: []wirePart{{Type: partText, Text: plain}}}
 		return nil
 	}
-	var parts []struct {
-		Text string `json:"text"`
-	}
+	var parts []wirePart
 	if err := json.Unmarshal(data, &parts); err != nil {
 		return err
 	}
-	var joined strings.Builder
-	for _, part := range parts {
-		joined.WriteString(part.Text)
-	}
-	*c = content(joined.String())
+	*c = content{Parts: parts}
 	return nil
 }
 
-func (c content) MarshalJSON() ([]byte, error) { return json.Marshal(string(c)) }
+func (c content) MarshalJSON() ([]byte, error) {
+	if marked(c.Parts) {
+		return json.Marshal(c.Parts)
+	}
+	return json.Marshal(c.text())
+}
+
+// wirePart is one part of a message body. The breakpoint is the caller's bytes
+// under the caller's name — this dialect and the base spell the field the same,
+// so it is placed rather than mapped, and its mode is never inspected.
+type wirePart struct {
+	Type       string          `json:"type"`
+	Text       string          `json:"text"`
+	Breakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
+}
 
 type wireMessage struct {
 	Role             string         `json:"role"`
@@ -549,6 +668,10 @@ type wireUsage struct {
 	PromptTokens  int `json:"prompt_tokens"`
 	PromptDetails struct {
 		CachedTokens int `json:"cached_tokens"`
+		// The write count sits beside the read count here, buffered and streamed
+		// alike, and under the same name at both endpoints serving this shape —
+		// the same way the marker that causes it is identical at both.
+		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokens  int `json:"completion_tokens"`
 	CompletionDetails struct {

@@ -24,6 +24,13 @@ type Request struct {
 	Include           []string       `json:"include,omitempty"`
 	Metadata          map[string]any `json:"metadata,omitempty"`
 
+	// PromptCacheKey is bytes rather than a string because its value is the
+	// provider's to judge. A caller who sends a shape this base did not expect
+	// is forwarded and refused by the endpoint, where typing it would make
+	// dragoman refuse first and on no authority.
+	PromptCacheKey     json.RawMessage     `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
+
 	// Raw is the body exactly as it arrived. The openai-responses backend
 	// passes it through unchanged when no flag overrides it, which is what
 	// makes that path a faithful pass-through, and the dropped-field diff is
@@ -88,6 +95,19 @@ type Reasoning struct {
 	Summary *string `json:"summary,omitempty"`
 }
 
+// PromptCacheOptions is the request-wide caching setting. TTL is named because
+// it is request-wide here and per breakpoint on the dialect that spells a
+// breakpoint its own way, so the one value fans out onto every marker it
+// places. The value is opaque: a 30m is forwarded, never converted, because
+// choosing which TTL a request becomes is choosing a price.
+type PromptCacheOptions struct {
+	TTL *string
+	// Raw is the shape as it arrived. The dialects spelling this field OpenAI's
+	// way forward the bytes, so an option OpenAI adds travels without a release
+	// here; the one that reads the TTL out reports whatever else was inside.
+	Raw json.RawMessage
+}
+
 const (
 	ToolChoiceAuto     = "auto"
 	ToolChoiceNone     = "none"
@@ -127,6 +147,16 @@ func GetFormat(req Request) *Format {
 		return nil
 	}
 	return req.Text.Format
+}
+
+// GetCacheTTL returns the request-wide cache TTL, or nil. Absent stays absent:
+// a breakpoint with no TTL gets the backend's own default, and spelling one out
+// where none arrived would choose a price nobody asked for.
+func GetCacheTTL(req Request) *string {
+	if req.PromptCacheOptions == nil {
+		return nil
+	}
+	return req.PromptCacheOptions.TTL
 }
 
 // HasMixedStrictness reports whether the tools disagree about strictness,
@@ -200,4 +230,36 @@ func (c *ToolChoice) UnmarshalJSON(data []byte) error {
 type namedChoice struct {
 	Type string `json:"type"`
 	Name string `json:"name"`
+}
+
+// MarshalJSON returns the bytes that arrived, so the drop diff sees the whole
+// object consumed and a forwarding dialect sends it verbatim. A value dragoman
+// built rather than parsed carries the TTL alone.
+func (o PromptCacheOptions) MarshalJSON() ([]byte, error) {
+	if len(o.Raw) > 0 {
+		return o.Raw, nil
+	}
+	return json.Marshal(cacheOptions{TTL: o.TTL})
+}
+
+// UnmarshalJSON keeps the bytes whatever arrived in them. A shape the base does
+// not model loses its TTL and nothing else, exactly as ToolChoice loses its
+// name: the forwarding dialects still send what the caller wrote, and the one
+// that reads a TTL out reports what it could not carry. Failing here instead
+// would end the request before any provider saw it — dragoman refusing on a
+// provider's behalf, for a value set it does not own, and on the pass-through
+// path it would reject a body that used to travel byte for byte.
+func (o *PromptCacheOptions) UnmarshalJSON(data []byte) error {
+	raw := append(json.RawMessage(nil), data...)
+	var decoded cacheOptions
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		*o = PromptCacheOptions{Raw: raw}
+		return nil
+	}
+	*o = PromptCacheOptions{TTL: decoded.TTL, Raw: raw}
+	return nil
+}
+
+type cacheOptions struct {
+	TTL *string `json:"ttl,omitempty"`
 }

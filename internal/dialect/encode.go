@@ -77,7 +77,11 @@ func Unread(req base.Request, carries Carries) []base.Drop {
 	drops := []base.Drop{}
 	for _, field := range suppliedFields(req) {
 		if !carried[field] {
-			drops = append(drops, base.Drop{Path: field, Reason: base.DropUnimplemented})
+			// The reason is left to the dialect's table, which defaults it to
+			// unimplemented. Deciding it here would say every field a dialect
+			// does not place is one dragoman could place and has not, and some
+			// of them are fields the target has no equivalent for at all.
+			drops = append(drops, base.Drop{Path: field})
 		}
 	}
 	if req.ToolChoice != nil && !req.ToolChoice.Known() && carried["tool_choice"] {
@@ -88,6 +92,25 @@ func Unread(req base.Request, carries Carries) []base.Drop {
 		})
 	}
 	return drops
+}
+
+// Marked reports whether any of an item's content parts carries a cache
+// breakpoint. A dialect that has to spell its parts out to place a marker asks
+// this first, because a body with no marker must stay byte-identical to the one
+// it sent before breakpoints existed.
+func Marked(parts []base.ContentPart) bool {
+	for _, part := range parts {
+		if part.Marks() {
+			return true
+		}
+	}
+	return false
+}
+
+// MarkerPath names where in a request a breakpoint was placed. Entries carry a
+// path rather than a name, and a marker is only ever reachable at this depth.
+func MarkerPath(item, part int) string {
+	return fmt.Sprintf("input[%d].content[%d].prompt_cache_breakpoint", item, part)
 }
 
 // KnownChoice returns the tool choice a dialect can act on, or nil when the
@@ -124,6 +147,8 @@ func suppliedFields(req base.Request) []string {
 	add(req.Store != nil, "store")
 	add(len(req.Include) > 0, "include")
 	add(len(req.Metadata) > 0, "metadata")
+	add(req.PromptCacheKey != nil, "prompt_cache_key")
+	add(req.PromptCacheOptions != nil, "prompt_cache_options")
 	return supplied
 }
 
