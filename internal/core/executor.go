@@ -20,18 +20,12 @@ type Call struct {
 	Stream  bool
 }
 
-// Executor performs a call. It stays an interface with one HTTP
-// implementation so that routing through something other than HTTP later is
-// additive rather than a refactor.
 type Executor interface {
 	Do(ctx context.Context, call Call) (json.RawMessage, error)
 	Stream(ctx context.Context, call Call, onFrame func(base.Frame) error) error
 }
 
-// HTTPExecutor is the one implementation. Its timeout has to allow a
-// non-streaming request to legitimately run long, because a backend whose
-// required output cap had to be guessed is sized not to be the thing that
-// ruins the answer.
+// The timeout has to allow a non-streaming request to legitimately run long.
 type HTTPExecutor struct {
 	Client *http.Client
 }
@@ -69,9 +63,8 @@ func (e HTTPExecutor) Stream(ctx context.Context, call Call, onFrame func(base.F
 	return ReadFrames(resp.Body, onFrame)
 }
 
-// ReadFrames splits a response stream into frames. It accepts both
-// server-sent events and bare newline-delimited JSON, because framing belongs
-// to the transport and the dialects disagree about which they use.
+// Backends frame their streams as server-sent events or as bare
+// newline-delimited JSON.
 func ReadFrames(reader io.Reader, onFrame func(base.Frame) error) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)

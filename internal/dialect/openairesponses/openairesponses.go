@@ -1,6 +1,5 @@
-// Package openairesponses speaks the dialect the base is written in. Encoding
-// is therefore the arriving body with the overrides applied to it, and decoding
-// recognises the grammar the emitter itself produces.
+// Package openairesponses speaks the dialect the base is written in, so encoding
+// is the arriving body with the overrides applied to it.
 package openairesponses
 
 import (
@@ -12,7 +11,6 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
-// Name is the dialect's value on the command line.
 const Name = "openai-responses"
 
 func Dialect() dialect.Dialect {
@@ -37,9 +35,8 @@ func Dialect() dialect.Dialect {
 func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
 	changes := map[string]any{}
 
-	// Compare against what the body means rather than against which keys it
-	// happens to carry: an absent stream already means false, so writing one
-	// in would rewrite a body that needed no change.
+	// An absent stream already means false, so writing one in would rewrite a
+	// body that needed no change.
 	if stream != base.GetStream(req) {
 		changes["stream"] = stream
 	}
@@ -62,16 +59,11 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 			return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", Name, err)
 		}
 	}
-	// The body the backend receives is the body the caller sent with the
-	// overrides written onto it, so nothing the base did not model is lost on
-	// this edge: an override moves the top-level key order and touches no
-	// value it did not name.
+	// An override moves the top-level key order and touches no value it did not
+	// name.
 	return dialect.Encoded{Body: body}, nil
 }
 
-// decodeState remembers which items already streamed their content, so that a
-// terminal item frame completes a truncated item without doubling one that
-// arrived as deltas.
 type decodeState struct {
 	Streamed []string
 }
@@ -151,9 +143,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	}
 	built = append(built, outcomePieces(resp)...)
 
-	// The diff is scoped to the answer-bearing subtree. A request echo the
-	// backend replays is not part of the answer, and reporting it would bury
-	// the drop that does produce a confident, well-formed, wrong result.
+	// A request echo the backend replays is not part of the answer.
 	var envelope struct {
 		Output json.RawMessage `json:"output"`
 	}
@@ -185,9 +175,6 @@ func itemPath(outputIndex *int) string {
 	return dialect.IndexedPath("output", *outputIndex)
 }
 
-// closePieces renders a complete item. Content already delivered as deltas is
-// not repeated; a truncated item still gets everything the terminal frame
-// carried.
 func closePieces(item base.Item, alreadyStreamed bool) []base.Piece {
 	pieces := []base.Piece{}
 	if !alreadyStreamed {

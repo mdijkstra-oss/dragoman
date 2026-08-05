@@ -1,7 +1,3 @@
-// Package pipe is the stdin-to-stdout transport. It owns argv-adjacent
-// concerns only: reading and writing the streams, event framing, and the exit
-// code. Flag precedence, backend selection, translation and the dropped-field
-// diff are core concerns it hands over and never implements.
 package pipe
 
 import (
@@ -22,31 +18,19 @@ type Streams struct {
 	Err io.Writer
 }
 
-// Flusher is the part of a writer that can push bytes out now. Streamed output
-// is written and flushed per event: accumulating events and writing them at
-// the end yields byte-identical output while defeating the whole purpose of
-// the mode, so this is a correctness requirement, not a performance note.
 type Flusher interface{ Flush() error }
 
-// Report is what the caller asked to see beside the answer. Diagnostics go to
-// stderr so that stdout stays the response a client can parse.
 type Report struct {
 	Verbose bool
 	Timing  bool
 }
 
-// Run performs one translation and writes its result. It returns the exit
-// code: zero when a response was returned and translated, one when the backend
-// said no, and two when dragoman could not run.
 func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams Streams, executor core.Executor, report Report) int {
 	body, err := io.ReadAll(streams.In)
 	if err != nil {
 		return fail(streams.Err, core.Fail(core.ExitUsage, "reading input: %s", err))
 	}
 
-	// Wall time is the transport's to measure: it owns the invocation, and the
-	// core stays free of a clock so that translation is a function from data
-	// to data.
 	started := time.Now()
 	firstEvent := time.Duration(0)
 	sink := func(event base.Event) error {
@@ -64,9 +48,6 @@ func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams S
 	if report.Verbose {
 		writeVerbose(streams.Err, result)
 	}
-	// Drops are returned as data; the transport decides they go to stderr. A
-	// drop that could not have changed the exchange is part of the diff rather
-	// than news, so it is kept for -v, where the caller asked for all of it.
 	if runErr == nil {
 		reported := result.Drops
 		if !report.Verbose {
@@ -95,8 +76,6 @@ func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams S
 	return int(core.ExitOK)
 }
 
-// OpenInput returns the reader for a request body, and whether it must be
-// closed.
 func OpenInput(path string) (io.ReadCloser, error) {
 	if path == "" || path == "-" {
 		return io.NopCloser(os.Stdin), nil
@@ -111,9 +90,6 @@ func OpenOutput(path string) (io.WriteCloser, error) {
 	return os.Create(path)
 }
 
-// writeEvent frames one event as a line of newline-delimited JSON and pushes
-// it out. Re-framing this identical sequence as server-sent events is what the
-// HTTP transport will do, so the framing choice never costs fidelity.
 func writeEvent(out io.Writer, event base.Event) error {
 	encoded, err := base.EncodeEvent(event)
 	if err != nil {
@@ -141,9 +117,8 @@ func writeBody(streams Streams, body []byte) int {
 	return int(core.ExitOK)
 }
 
-// writeTiming reports how long the round trip took. Time to the first event is
-// the number that separates two models on the same prompt; total elapsed is
-// the one that separates two backends.
+// Time to the first event separates two models on the same prompt; total elapsed
+// separates two backends.
 func writeTiming(err io.Writer, elapsed, firstEvent time.Duration) {
 	if firstEvent > 0 {
 		fmt.Fprintf(err, "elapsed %s, first event %s\n", round(elapsed), round(firstEvent))

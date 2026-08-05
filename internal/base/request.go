@@ -5,10 +5,8 @@ import (
 	"fmt"
 )
 
-// Request is an openai-responses request body. Optional scalars are pointers so
-// that absent stays absent: a level nobody asked for is never filled in, since
-// providers default differently and inventing one silently changes both cost
-// and behaviour.
+// Optional scalars are pointers because providers default differently, and
+// inventing a level nobody asked for changes both cost and behaviour.
 type Request struct {
 	Model             *string        `json:"model,omitempty"`
 	Instructions      *string        `json:"instructions,omitempty"`
@@ -24,27 +22,17 @@ type Request struct {
 	Include           []string       `json:"include,omitempty"`
 	Metadata          map[string]any `json:"metadata,omitempty"`
 
-	// PromptCacheKey is bytes rather than a string because its value is the
-	// provider's to judge. A caller who sends a shape this base did not expect
-	// is forwarded and refused by the endpoint, where typing it would make
-	// dragoman refuse first and on no authority.
 	PromptCacheKey     json.RawMessage     `json:"prompt_cache_key,omitempty"`
 	PromptCacheOptions *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 
-	// Raw is the body exactly as it arrived. The openai-responses backend
-	// encodes from these bytes rather than from the typed fields, which is what
-	// keeps a field this base does not model on that path, and the
-	// dropped-field diff is computed against it.
 	Raw json.RawMessage `json:"-"`
 }
 
-// Input is a Responses input, which is either a bare string or an item list.
-// The base is the same format as the wire, so both forms have to arrive.
+// A Responses input arrives as a bare string or as an item list.
 type Input []Item
 
-// Tool is a function tool definition. Responses keeps the schema flat; other
-// dialects nest it at their own depth. A tool whose type is not "function"
-// names a capability dragoman does not carry.
+// Responses keeps a tool's schema flat; other dialects nest it at their own
+// depth.
 type Tool struct {
 	Type        string          `json:"type"`
 	Name        string          `json:"name"`
@@ -53,19 +41,14 @@ type Tool struct {
 	Strict      *bool           `json:"strict,omitempty"`
 }
 
-// ToolChoice is either a mode string (auto, none, required) or a named
-// function. Every dialect spells the named form differently.
+// A tool choice is a mode string (auto, none, required) or a named function,
+// and every dialect spells the named form differently.
 type ToolChoice struct {
 	Mode string
 	Name string
-	// Raw is the shape as it arrived. Responses has forms beyond a mode and a
-	// named function; keeping the bytes lets the base round-trip them and lets
-	// a dialect that cannot express one report it rather than invent a value.
-	Raw json.RawMessage
+	Raw  json.RawMessage
 }
 
-// Known reports whether a tool choice is one of the forms every dialect can
-// express: a mode, or a named function.
 func (c ToolChoice) Known() bool {
 	if c.Name != "" {
 		return true
@@ -79,8 +62,7 @@ type TextConfig struct {
 	Verbosity *string `json:"verbosity,omitempty"`
 }
 
-// Format is a structured-output request. Responses nests strict here; the two
-// OpenAI dialects disagree with each other on the depth.
+// Responses nests strict here; the two OpenAI dialects disagree about its depth.
 type Format struct {
 	Type   string          `json:"type"`
 	Name   string          `json:"name,omitempty"`
@@ -102,9 +84,6 @@ type Reasoning struct {
 // choosing which TTL a request becomes is choosing a price.
 type PromptCacheOptions struct {
 	TTL *string
-	// Raw is the shape as it arrived. The dialects spelling this field OpenAI's
-	// way forward the bytes, so an option OpenAI adds travels without a release
-	// here; the one that reads the TTL out reports whatever else was inside.
 	Raw json.RawMessage
 }
 
@@ -149,9 +128,6 @@ func GetFormat(req Request) *Format {
 	return req.Text.Format
 }
 
-// GetCacheTTL returns the request-wide cache TTL, or nil. Absent stays absent:
-// a breakpoint with no TTL gets the backend's own default, and spelling one out
-// where none arrived would choose a price nobody asked for.
 func GetCacheTTL(req Request) *string {
 	if req.PromptCacheOptions == nil {
 		return nil
@@ -159,8 +135,8 @@ func GetCacheTTL(req Request) *string {
 	return req.PromptCacheOptions.TTL
 }
 
-// HasMixedStrictness reports whether the tools disagree about strictness,
-// which a per-request strictness dialect cannot express.
+// Some dialects carry strictness per request rather than per tool, and cannot
+// express tools that disagree about it.
 func HasMixedStrictness(tools []Tool) bool {
 	seenStrict, seenLoose := false, false
 	for _, tool := range tools {
@@ -187,7 +163,6 @@ func (i *Input) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// TextItem builds a single-part message item.
 func TextItem(role, partType, text string) Item {
 	return Item{Type: ItemMessage, Role: role, Content: []ContentPart{{Type: partType, Text: text}}}
 }
@@ -220,8 +195,6 @@ func (c *ToolChoice) UnmarshalJSON(data []byte) error {
 	}
 	*c = ToolChoice{Mode: named.Type, Name: named.Name, Raw: raw}
 	if named.Type != ToolChoiceFunction {
-		// A shape the base does not model keeps its bytes and loses its
-		// name, so a dialect asks Known() rather than guessing at Mode.
 		c.Name = ""
 	}
 	return nil
@@ -242,13 +215,6 @@ func (o PromptCacheOptions) MarshalJSON() ([]byte, error) {
 	return json.Marshal(cacheOptions{TTL: o.TTL})
 }
 
-// UnmarshalJSON keeps the bytes whatever arrived in them. A shape the base does
-// not model loses its TTL and nothing else, exactly as ToolChoice loses its
-// name: the forwarding dialects still send what the caller wrote, and the one
-// that reads a TTL out reports what it could not carry. Failing here instead
-// would end the request before any provider saw it — dragoman refusing on a
-// provider's behalf, for a value set it does not own, and on the pass-through
-// path it would reject a body that used to travel byte for byte.
 func (o *PromptCacheOptions) UnmarshalJSON(data []byte) error {
 	raw := append(json.RawMessage(nil), data...)
 	var decoded cacheOptions

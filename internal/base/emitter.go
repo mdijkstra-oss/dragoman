@@ -5,18 +5,11 @@ import (
 	"sort"
 )
 
-// Emitter mints the Responses bookkeeping the source dialects do not carry —
-// item_id, output_index, content_index and sequence_number. Because there is
-// one output grammar, that bookkeeping is written once here and every dialect
-// decoder drives it. State is threaded, never mutated (R-9).
 type Emitter struct {
 	ResponseID string
 	Model      string
 	CreatedAt  int64
 
-	// Started records that the lifecycle was opened, so a stream that carried
-	// nothing still produces created and in_progress before its terminal
-	// event rather than a terminal event on its own.
 	Started bool
 
 	Seq       int
@@ -31,16 +24,12 @@ type Emitter struct {
 	Error      *ResponseError
 }
 
-// OpenItem is an item the decoder has seen open and not yet close. What must
-// be held is bounded by one item: the accumulators below plus its identity.
 type OpenItem struct {
 	Key         string
 	Kind        ItemType
 	ItemID      string
 	OutputIndex int
 
-	// Parts holds the two content channels an item can carry, indexed by
-	// channel. They differ only in which events name them.
 	Parts [channels]partState
 
 	Arguments string
@@ -48,20 +37,16 @@ type OpenItem struct {
 	Name   string
 	CallID string
 
-	// State is the provider state pocket. It is filled during the item and
-	// attached at output_item.done rather than .added, because Gemini streams
-	// its signature as a delta and DeepSeek's reasoning arrives progressively.
+	// Attached at output_item.done rather than .added: Gemini streams its
+	// signature as a delta and DeepSeek's reasoning arrives progressively.
 	State string
 }
 
-// partState is one content channel of an open item.
 type partState struct {
 	Open bool
 	Text string
 }
 
-// channelID names a content channel. The answer and the reasoning summary run
-// through identical machinery under different event names.
 type channelID int
 
 const (
@@ -81,8 +66,6 @@ var channelEvents = [channels]struct {
 	summary: {PartSummary, EventSummaryPartAdded, EventSummaryPartDone, EventSummaryTextDelta, EventSummaryTextDone},
 }
 
-// PlacedItem is a closed item together with the output index it occupies, so
-// that items which interleave still fold back in wire order.
 type PlacedItem struct {
 	Index int
 	Item  Item
@@ -134,19 +117,14 @@ func OpenAs(e Emitter, key string, kind ItemType, itemID string) (Emitter, []Eve
 	return e, append(opened, added...)
 }
 
-// TextDelta appends assistant text to a message item, opening it if the
-// dialect never announced a start.
 func TextDelta(e Emitter, key, text string) (Emitter, []Event) {
 	return channelDelta(e, key, ItemMessage, answer, text)
 }
 
-// SummaryDelta appends to a reasoning item's human-readable summary.
 func SummaryDelta(e Emitter, key, text string) (Emitter, []Event) {
 	return channelDelta(e, key, ItemReasoning, summary, text)
 }
 
-// channelDelta appends to one content channel, opening its part on first use so
-// that an item which never produces content never announces one.
 func channelDelta(e Emitter, key string, kind ItemType, which channelID, text string) (Emitter, []Event) {
 	e, opened := ensureOpen(e, key, kind)
 	index, _ := findOpen(e, key)
@@ -178,7 +156,6 @@ func channelDelta(e Emitter, key string, kind ItemType, which channelID, text st
 	return e, concat(opened, partEvents, delta)
 }
 
-// ArgumentsDelta appends to a function call's argument buffer.
 func ArgumentsDelta(e Emitter, key, fragment string) (Emitter, []Event) {
 	e, opened := ensureOpen(e, key, ItemFunctionCall)
 	index, _ := findOpen(e, key)
@@ -194,9 +171,7 @@ func ArgumentsDelta(e Emitter, key, fragment string) (Emitter, []Event) {
 	return e, append(opened, delta...)
 }
 
-// SetCall records the identity of a function call. The call id is the identity
-// the next request's result references; each dialect places it where it
-// belongs.
+// The call id is what the next request's tool result references.
 func SetCall(e Emitter, key, callID, name string) (Emitter, []Event) {
 	e, opened := ensureOpen(e, key, ItemFunctionCall)
 	index, _ := findOpen(e, key)
@@ -211,10 +186,7 @@ func SetCall(e Emitter, key, callID, name string) (Emitter, []Event) {
 	return e, opened
 }
 
-// SetState fills the provider state pocket for an item. dragoman does not
-// inspect it, classify it, or care that one provider's is base64 and
-// another's readable prose. State accumulates because some backends stream
-// their signature as a delta.
+// State accumulates because some backends stream their signature as a delta.
 func SetState(e Emitter, key, state string) (Emitter, []Event) {
 	e, opened := ensureOpen(e, key, ItemReasoning)
 	index, _ := findOpen(e, key)
@@ -224,8 +196,6 @@ func SetState(e Emitter, key, state string) (Emitter, []Event) {
 	return e, opened
 }
 
-// Close finishes an item, emitting its done events and moving it into the
-// output at the index it was assigned.
 func Close(e Emitter, key string) (Emitter, []Event) {
 	index, found := findOpen(e, key)
 	if !found {
@@ -285,9 +255,7 @@ func SetUsage(e Emitter, usage *Usage) Emitter {
 	return e
 }
 
-// SetOutcome records the terminal state. An unknown provider stop reason is
-// not dragoman's business; callers map it to one of the three base statuses
-// and keep the provider's own wording in IncompleteDetails.
+// A provider's own stop reason is kept verbatim in IncompleteDetails.
 func SetOutcome(e Emitter, status string, incomplete *IncompleteDetails, err *ResponseError) Emitter {
 	e.Status = status
 	e.Incomplete = incomplete
@@ -295,9 +263,8 @@ func SetOutcome(e Emitter, status string, incomplete *IncompleteDetails, err *Re
 	return e
 }
 
-// Finish closes anything still open and emits the terminal event. A stream may
-// end with items open — max_tokens, a dropped connection, a mid-stream refusal
-// — and without an explicit flush that is undefined behaviour.
+// A stream may end with items still open: max_tokens, a dropped connection, a
+// mid-stream refusal.
 func Finish(e Emitter) (Emitter, []Event) {
 	e, events := Begin(e)
 	for len(e.Open) > 0 {
@@ -399,9 +366,8 @@ func closedItem(item OpenItem) Item {
 		closed.CallID = item.CallID
 		closed.Name = item.Name
 		closed.Arguments = item.Arguments
-		// A backend that binds its state to the call rather than to a
-		// preceding reasoning item keeps it here, so it goes back on the item
-		// it arrived on.
+		// Gemini binds its state to the call rather than to a preceding
+		// reasoning item.
 		closed.EncryptedContent = item.State
 	case ItemReasoning:
 		closed.Status = ""

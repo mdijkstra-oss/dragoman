@@ -2,9 +2,6 @@ package base
 
 import "encoding/json"
 
-// EventType is the one output event vocabulary. dragoman does not invent an
-// event grammar, so there is no output format to choose between — only whether
-// this grammar is delivered folded or unfolded.
 type EventType string
 
 const (
@@ -33,9 +30,6 @@ const (
 	EventFailed     EventType = "response.failed"
 )
 
-// Event is one frame of the Responses lifecycle. The bookkeeping fields
-// (SequenceNumber, ItemID, OutputIndex, ContentIndex) are minted by the
-// emitter, never translated, because the source dialects do not carry them.
 type Event struct {
 	Type           EventType `json:"type"`
 	SequenceNumber int       `json:"sequence_number"`
@@ -57,8 +51,6 @@ func IsTerminal(event Event) bool {
 	return terminalEvents[event.Type]
 }
 
-// EncodeEvent renders one event as a single line of NDJSON. Framing belongs to
-// the transport; this is the payload an SSE re-framing would carry verbatim.
 func EncodeEvent(event Event) ([]byte, error) { return json.Marshal(event) }
 
 var terminalEvents = map[EventType]bool{

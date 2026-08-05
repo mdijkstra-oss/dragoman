@@ -1,10 +1,3 @@
-// Package serve is the HTTP transport. It owns what a listener adds and
-// nothing more: resolving a service out of the model the body names, framing
-// the answer as one JSON body or as server-sent events, and mapping a failure
-// to a status.
-// Flag precedence, backend selection, translation and the dropped-field diff
-// are core concerns it hands over and never implements, which is what makes
-// this a sibling of the pipe rather than a second pipeline.
 package serve
 
 import (
@@ -23,10 +16,6 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/core"
 )
 
-// Config is what the operator settled before the listener runs. There is no
-// model, effort or cap here on purpose: those travel in the body, and a
-// server-side default would make the same request mean different things at
-// different instances.
 type Config struct {
 	Catalog  core.Catalog
 	Executor core.Executor
@@ -43,9 +32,6 @@ type Config struct {
 	LogHeaders []string
 }
 
-// Service is one row of GET /services. It names the variable a service needs
-// and never a key, and never whether one is set: an instance describes what it
-// can address, not what it holds.
 type Service struct {
 	Name     string `json:"name"`
 	Protocol string `json:"protocol"`
@@ -53,14 +39,11 @@ type Service struct {
 	Auth     string `json:"auth"`
 }
 
-// StatusBackendRefused answers a refusal the backend did not attach a status
-// to — a provider error arriving in the body with a 200 on the status line.
-// When there is a real status it is passed through instead, so that a rate
-// limit keeps the retry semantics an SDK already implements.
+// For a provider error arriving in the body with a 200 on the status line. A
+// real status is passed through instead, so a rate limit keeps the retry
+// semantics an SDK already implements.
 const StatusBackendRefused = http.StatusBadGateway
 
-// New builds the listener. It holds no state beyond these dependencies, so two
-// instances serving the same table answer the same request the same way.
 func New(cfg Config) http.Handler {
 	listener := server{
 		catalog:  cfg.Catalog,
@@ -152,8 +135,7 @@ func (s server) streamed(w http.ResponseWriter, r *http.Request, opts core.Optio
 		s.served(r, opts, http.StatusOK, elapsed, result.Usage)
 		return
 	}
-	// The status line went out with the first event, so what is left to say has
-	// to be said in the format the caller is already reading.
+	// The status line went out with the first event.
 	if events.Started() {
 		s.log.Error("stream failed", "service", opts.Preset, "error", err.Error())
 		_ = events.Fail(responseError(statusOf(err), err.Error()))
@@ -171,13 +153,9 @@ func (s server) unrouted(w http.ResponseWriter, r *http.Request) {
 		"POST /responses, GET /services and GET /health", r.URL.Path))
 }
 
-// address reads the service off the front of a model and returns the name the
-// backend is to be asked for. The split is on the first slash only, so a
-// provider whose own identifiers are paths — openrouter spells one
-// anthropic/claude-3 — keeps its identifier whole behind the service serving
-// it. Both halves have to be there: a name that is all service or all model
-// addresses nothing, and forwarding it would send the segment upstream as part
-// of the model.
+// The split is on the first slash only: OpenRouter's own identifiers are paths,
+// spelled anthropic/claude-3, and have to stay whole behind the service serving
+// them.
 func address(named string) (service, model string, addressed bool) {
 	service, model, split := strings.Cut(named, "/")
 	return service, model, split && service != "" && model != ""
@@ -187,9 +165,6 @@ func health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, []byte(liveness))
 }
 
-// only guards a route to one method. The listener answers a wrong method in
-// the same error shape as everything else, because a client that can only read
-// one format has to be able to read this too.
 func (s server) only(method string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != method {
@@ -202,10 +177,6 @@ func (s server) only(method string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// record puts drops in the server log and nowhere else. The response is the
-// answer; a caller who wants the diff has the pipe. A warning is for the drops
-// that changed the exchange: an inert drop repeated on every request is how an
-// operator learns to skim past the warnings that matter, so it goes to debug.
 func (s server) record(service string, drops []base.Drop) {
 	notable, inert := base.PartitionDrops(drops)
 	if len(notable) > 0 {
@@ -216,14 +187,6 @@ func (s server) record(service string, drops []base.Drop) {
 	}
 }
 
-// served is the accounting line: one record per request that worked, written
-// where the money was spent. A translating proxy is the only place that knows
-// both which service answered and what the answer cost, and a caller in front
-// of it can log what it served without being able to say either.
-//
-// The duration is dragoman's exchange with the backend — translation, the call,
-// and the decode — and not the caller's view of its own request, which includes
-// a network hop dragoman cannot see.
 func (s server) served(r *http.Request, opts core.Options, status int, elapsed time.Duration, usage *base.Usage) {
 	fields := []any{
 		"service", opts.Preset,
@@ -238,10 +201,8 @@ func (s server) served(r *http.Request, opts core.Options, status int, elapsed t
 	s.log.Log(r.Context(), slog.LevelInfo, "request served", fields...)
 }
 
-// tokenCounts flattens the usage record into fields. The details hang off
-// pointers a backend that reported none leaves nil, and every count is written
-// anyway, at zero: a record whose key set depends on which provider answered
-// cannot be summed across a day of them.
+// Every count is written even at zero: a record whose key set depends on which
+// provider answered cannot be summed across a day of them.
 func tokenCounts(usage *base.Usage) []any {
 	counted := base.Usage{}
 	if usage != nil {
@@ -269,9 +230,6 @@ func (s server) fail(w http.ResponseWriter, r *http.Request, status int, message
 	writeFailure(w, status, message)
 }
 
-// statusOf maps a run failure to a status. The unknown service and the unset
-// credential never reach it: the core reports both as the same usage failure an
-// unparseable body produces, so the listener decides those before it runs.
 func statusOf(err error) int {
 	switch code := core.CodeOf(err); code {
 	case core.ExitOK:
@@ -291,17 +249,10 @@ func statusOf(err error) int {
 	}
 }
 
-// hasCredential asks the question core.Run asks again before it calls a
-// backend. It is asked twice because the answer decides a status and the core
-// cannot say which of its usage failures this was; a distinguishable failure in
-// the core is the fix, not a check the transport keeps. A service that names no
-// variable holds its own credential and has nothing to be missing.
 func hasCredential(backend base.Backend) bool {
 	return backend.KeyEnv == "" || os.Getenv(backend.KeyEnv) != ""
 }
 
-// getServices renders the table as data, sorted so an instance describes itself
-// the same way twice.
 func getServices(table map[string]base.Backend) []Service {
 	rows := make([]Service, 0, len(table))
 	for _, name := range serviceNames(table) {
@@ -320,7 +271,6 @@ func serviceNames(table map[string]base.Backend) []string {
 	return slices.Sorted(maps.Keys(table))
 }
 
-// failureBody is an openai-responses error object.
 type failureBody struct {
 	Error base.ResponseError `json:"error"`
 }
@@ -333,8 +283,6 @@ func responseError(status int, message string) base.ResponseError {
 	return base.ResponseError{Type: errorType(status), Message: message}
 }
 
-// errorType names the failure in the caller's vocabulary: a 5xx is dragoman's
-// or the backend's, and everything else is the request's.
 func errorType(status int) string {
 	if status >= http.StatusInternalServerError {
 		return "server_error"
@@ -348,8 +296,6 @@ func writeJSON(w http.ResponseWriter, status int, encoded []byte) {
 	_, _ = w.Write(encoded)
 }
 
-// encodeStrings renders a value whose fields are all strings. Such a value
-// cannot fail to encode, so a failure here is a programmer error.
 func encodeStrings(value any) []byte {
 	encoded, err := json.Marshal(value)
 	if err != nil {

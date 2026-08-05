@@ -6,16 +6,8 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
-// Carries declares which base request fields a dialect places somewhere. The
-// diff finds keys the base did not model; this says what the dialect can
-// express. A field the caller sent that neither covers is a drop, because
-// silence is not an option: a dropped field produces a confident, well-formed,
-// wrong answer.
 type Carries []string
 
-// Handlers is a dispatch table over the four item types the base moves, so
-// that walking an input list is written once rather than once per dialect
-// (R-2, R-4).
 type Handlers struct {
 	Message   func(base.Item)
 	Reasoning func(base.Item)
@@ -23,9 +15,6 @@ type Handlers struct {
 	Output    func(base.Item)
 }
 
-// WalkItems dispatches each input item and reports the ones dragoman does not
-// move. An item type is the caller's value, not a set dragoman owns, so an
-// unrecognised one is reported rather than panicked on.
 func WalkItems(items []base.Item, handlers Handlers) ([]base.Drop, error) {
 	drops := []base.Drop{}
 	for index, item := range items {
@@ -77,10 +66,6 @@ func Unread(req base.Request, carries Carries) []base.Drop {
 	drops := []base.Drop{}
 	for _, field := range suppliedFields(req) {
 		if !carried[field] {
-			// The reason is left to the dialect's table, which defaults it to
-			// unimplemented. Deciding it here would say every field a dialect
-			// does not place is one dragoman could place and has not, and some
-			// of them are fields the target has no equivalent for at all.
 			drops = append(drops, base.Drop{Path: field})
 		}
 	}
@@ -113,9 +98,8 @@ func MarkerPath(item, part int) string {
 	return fmt.Sprintf("input[%d].content[%d].prompt_cache_breakpoint", item, part)
 }
 
-// KnownChoice returns the tool choice a dialect can act on, or nil when the
-// caller sent a shape the base does not model. Reporting it beats inventing a
-// wire value the provider will reject or, worse, silently ignore.
+// A wire value dragoman invented here is one the provider rejects or, worse,
+// silently ignores.
 func KnownChoice(req base.Request) *base.ToolChoice {
 	if req.ToolChoice == nil || !req.ToolChoice.Known() {
 		return nil
@@ -123,8 +107,6 @@ func KnownChoice(req base.Request) *base.ToolChoice {
 	return req.ToolChoice
 }
 
-// suppliedFields lists the base fields the caller actually set, by their wire
-// names, so that a dialect's Carries list can be subtracted from it.
 func suppliedFields(req base.Request) []string {
 	supplied := []string{}
 	add := func(present bool, name string) {

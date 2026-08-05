@@ -1,6 +1,5 @@
-// Package openaicompletions speaks POST /v1/chat/completions — a body format
-// several companies serve. It is the one decoder that has to infer item
-// structure rather than read it: a new tool call is a new index appearing, and
+// Package openaicompletions speaks POST /v1/chat/completions. The format
+// announces no item boundaries: a new tool call is a new index appearing, and
 // the turn ends when the stream says it is over.
 package openaicompletions
 
@@ -14,24 +13,19 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
-// Name is the wire format most endpoints of this shape serve.
 const Name = "openai-completions"
 
-// ChatName is the same shape as OpenAI's own endpoint serves it. Two endpoints
-// that disagree about a field's name are two wire formats, and naming them
-// alike is what would force a config file to relocate the field for them.
+// OpenAI's own endpoint spells the output cap and streamed usage differently
+// from everyone else serving this shape.
 const ChatName = "openai-chat-completions"
 
-// Keys under which the decoder tracks the items it infers.
 const (
 	reasoningKey = "reasoning"
 	messageKey   = "message"
 	callPrefix   = "call:"
 )
 
-// partText is what this dialect calls a text part, where the base calls it
-// input_text. The breakpoint riding on that part keeps its own name, which is
-// why carrying it costs no mapping code.
+// This dialect's name for what the base calls input_text.
 const partText = "text"
 
 // variant is the whole of what the two formats disagree about. Everything else
@@ -51,8 +45,8 @@ func ChatDialect() dialect.Dialect {
 	return build(variant{
 		name:     ChatName,
 		capField: "max_completion_tokens",
-		// Usage while streaming has to be asked for here, and arrives unasked
-		// everywhere else serving this shape.
+		// OpenAI reports streamed usage only when asked; everyone else serving
+		// this shape reports it unasked.
 		streamUsage: true,
 	})
 }
@@ -143,7 +137,7 @@ func encode(spoken variant, req base.Request, backend base.Backend, stream bool)
 			drops = append(drops, base.Drop{
 				Path:   "text.format",
 				Reason: base.DropUnsupported,
-				Detail: fmt.Sprintf("%s has no schema mode", backend.Name),
+				Detail: fmt.Sprintf("%s has no schema mode; the schema was written into the prompt and is not enforced", backend.Name),
 			})
 		} else {
 			schema := map[string]any{"name": format.Name, "schema": format.Schema}
@@ -195,9 +189,8 @@ func buildMessages(req base.Request) ([]wireMessage, []base.Drop, error) {
 			turn.Content = join(turn.Content, item)
 		},
 		Reasoning: func(item base.Item) {
-			// This dialect has no reasoning item of its own; the backends that
-			// reason here supply their own field, and whatever they returned
-			// goes back unaltered.
+			// The format has no reasoning item; backends that reason here supply
+			// their own field.
 			if item.EncryptedContent == "" {
 				return
 			}
@@ -224,18 +217,12 @@ func buildMessages(req base.Request) ([]wireMessage, []base.Drop, error) {
 	return messages, drops, err
 }
 
-// contentOf renders an item's content, carrying each part's breakpoint. Whether
-// the parts reach the wire spelled out or folded into one string is content's
-// own decision; a part carrying nothing at all is left off entirely, exactly as
-// the joined form was before parts were kept.
 func contentOf(item base.Item) *content {
 	built := &content{}
 	for _, part := range item.Content {
 		if part.Text == "" {
-			// Spelled out, a part with no text would be a text block dragoman
-			// minted rather than one the caller sent — and a marker riding on
-			// it would move the caller's prefix boundary onto it. Left off, as
-			// the joined form always left it off; markerDrops names the marker.
+			// A marker riding on an empty part would move the caller's prefix
+			// boundary onto it.
 			continue
 		}
 		marker := json.RawMessage(nil)
@@ -277,10 +264,6 @@ func markerDrops(items []base.Item) []base.Drop {
 	return drops
 }
 
-// join appends to a turn's existing content rather than replacing it, so a run
-// of assistant items keeps every one of them. The blank line between two of them
-// is text the model reads, so it rides on the part that follows rather than
-// going missing the moment a breakpoint forces the parts to be spelled out.
 func join(existing *content, item base.Item) *content {
 	addition := contentOf(item)
 	if existing == nil {
@@ -315,9 +298,6 @@ func buildTools(tools []base.Tool) []wireTool {
 	return built
 }
 
-// toolChoice places the named form one level deeper than the base does. A
-// shape the base does not model is reported rather than sent as a mode string
-// the provider does not define.
 func toolChoice(req base.Request) any {
 	known := dialect.KnownChoice(req)
 	if known == nil {
@@ -367,8 +347,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		current.Started = true
 		built = append(built, base.Start(chunk.ID, chunk.Model, chunk.Created))
 	}
-	// A chunk with no choices is not an error and not a turn boundary; it is
-	// where some endpoints report usage.
+	// Some endpoints report usage on a chunk with no choices.
 	if chunk.Usage != nil {
 		built = append(built, usagePiece(chunk.Usage))
 	}
@@ -416,15 +395,9 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	return dialect.Recognised{Pieces: built, Drops: drops}, nil
 }
 
-// messagePieces renders a whole buffered message, opening and closing each
-// item explicitly because nothing arrived as a delta.
-//
-// A buffered body cannot express ordering: reasoning, content and tool calls
-// are separate fields on one message rather than a sequence. The canonical
-// order below is the one both endpoints of this shape produce on the wire, so
-// folding a real stream agrees with decoding the body it corresponds to. A
-// stream that genuinely interleaved them differently would keep its own order,
-// because arrival order there is information the body does not carry.
+// A buffered body cannot express ordering: reasoning, content and tool calls are
+// separate fields on one message. The order below is the one both endpoints of
+// this shape produce on the wire.
 func messagePieces(message wireMessage) []base.Piece {
 	built := []base.Piece{}
 	if message.ReasoningContent != "" {
@@ -454,9 +427,7 @@ func messagePieces(message wireMessage) []base.Piece {
 	return built
 }
 
-// deltaPieces infers item structure from which delta key is populated. Empty
-// and null content are structural filler on both endpoints of this shape and
-// must not be treated as text.
+// Empty and null content are structural filler on both endpoints of this shape.
 func deltaPieces(delta wireDelta) []base.Piece {
 	built := []base.Piece{}
 	if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
@@ -473,8 +444,7 @@ func deltaPieces(delta wireDelta) []base.Piece {
 			index = *fragment.Index
 		}
 		key := callKey(index)
-		// Identity arrives on the first fragment for an index and never
-		// again; a decoder that waits for it on later fragments loses it.
+		// Identity arrives on the first fragment for an index and never again.
 		if fragment.ID != "" || fragment.Function.Name != "" {
 			built = append(built, base.CallPiece(key, fragment.ID, fragment.Function.Name))
 		}
@@ -485,9 +455,6 @@ func deltaPieces(delta wireDelta) []base.Piece {
 	return built
 }
 
-// outcomePiece maps a finish reason onto a base status. A value the dialect
-// does not define passes through as a completed response rather than crashing
-// a decoder — that set belongs to the provider.
 var finishReasons = map[string]string{
 	"length":         "max_output_tokens",
 	"content_filter": "content_filter",
@@ -600,8 +567,8 @@ type wireToolCall struct {
 
 type wireCallBody struct {
 	Name string `json:"name,omitempty"`
-	// Arguments is a JSON string in both directions. Re-serialising it would
-	// change bytes the provider handed out, so it is carried verbatim.
+	// A JSON string in both directions; re-serialising would change bytes the
+	// provider handed out.
 	Arguments string `json:"arguments"`
 }
 
@@ -668,9 +635,8 @@ type wireUsage struct {
 	PromptTokens  int `json:"prompt_tokens"`
 	PromptDetails struct {
 		CachedTokens int `json:"cached_tokens"`
-		// The write count sits beside the read count here, buffered and streamed
-		// alike, and under the same name at both endpoints serving this shape —
-		// the same way the marker that causes it is identical at both.
+		// Both endpoints serving this shape report the write count beside the
+		// read count, under the same name, buffered and streamed alike.
 		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokens  int `json:"completion_tokens"`

@@ -13,14 +13,12 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
-// Name is the dialect's value on the command line.
 const Name = "gemini-interactions"
 
-// Revision pins the request schema. It is free to send and stops a future
-// default from moving the shape under the decoder.
+// Pins the request schema so a future default cannot move the shape under the
+// decoder. Free to send.
 const Revision = "2026-05-20"
 
-// Step types on the wire.
 const (
 	stepUserInput      = "user_input"
 	stepModelOutput    = "model_output"
@@ -47,10 +45,10 @@ func Dialect() dialect.Dialect {
 		BodyPieces:   bodyPieces,
 		DropTable: dialect.DropTable(map[string]base.DropReason{
 			"strict": base.DropUnsupported,
-			// There is no inline caching field here at all, and both routes that
-			// would stand in for one are stateful — CachedContent on the legacy
-			// API, or a previous interaction id. A stateless proxy reaches
-			// neither, so the drop is permanent rather than pending.
+			// There is no inline caching field here. Both routes that would
+			// stand in for one are stateful — CachedContent on the legacy API,
+			// or a previous interaction id — and a stateless proxy reaches
+			// neither.
 			"prompt_cache_key":     base.DropUnsupported,
 			"prompt_cache_options": base.DropUnsupported,
 		}),
@@ -129,10 +127,8 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
 }
 
-// strictness reports what became of the strict flag. A response schema on this
-// dialect constrains decoding whether or not it was asked to, so only half the
-// flag is lost: asking for strict is asking for what the request already gets,
-// and asking to relax it is the half that cannot be honoured.
+// A response schema here constrains decoding whether or not it was asked to, so
+// only asking to relax it is lost.
 func strictness(strict bool) base.Drop {
 	if strict {
 		return base.Drop{Path: "text.format.strict", Reason: base.DropInert,
@@ -195,9 +191,8 @@ func buildSteps(req base.Request) ([]wireStep, string, []base.Drop, error) {
 			return nil
 		},
 		Output: func(item base.Item) {
-			// The result is JSON text, so it is encoded as JSON rather than as
-			// a Go literal: the two disagree on control characters, and a Go
-			// literal would make the whole request unencodable.
+			// JSON and Go literals disagree on control characters, and a Go
+			// literal here would make the whole request unencodable.
 			result, err := json.Marshal(item.Output)
 			if err != nil {
 				result = []byte(`""`)
@@ -245,9 +240,8 @@ func callNames(items []base.Item) map[string]string {
 	return names
 }
 
-// toolChoice maps the base's choice onto a mode plus an allow-list. Strictness
-// here is per request rather than per tool, so a request with some tools
-// strict and some not cannot be expressed and is a named drop.
+// Strictness is per request here rather than per tool, so tools that disagree
+// about it cannot be expressed.
 func toolChoice(req base.Request) (any, []base.Drop) {
 	drops := []base.Drop{}
 	if base.HasMixedStrictness(req.Tools) {
@@ -261,9 +255,8 @@ func toolChoice(req base.Request) (any, []base.Drop) {
 	if known != nil && known.Name != "" {
 		return wireToolChoice{Allowed: wireAllowed{Mode: "any", Tools: []string{known.Name}}}, drops
 	}
-	// Strictness is expressed as a routing mode here: validated is auto plus
-	// constrained decoding, so it stands in for auto whenever every tool asked
-	// for it — including when the caller spelled auto out.
+	// Strictness is a routing mode here: validated is auto plus constrained
+	// decoding.
 	mode := ""
 	if known != nil {
 		mode = dialect.ChoiceModes[known.Mode]
@@ -277,8 +270,6 @@ func toolChoice(req base.Request) (any, []base.Drop) {
 	return mode, drops
 }
 
-// allStrict reports whether every tool asked for constrained decoding, which
-// is the only way this dialect's per-request strictness can stand in for it.
 func allStrict(tools []base.Tool) bool {
 	if len(tools) == 0 {
 		return false
@@ -291,8 +282,7 @@ func allStrict(tools []base.Tool) bool {
 	return true
 }
 
-// decodeState remembers the open step's identity. Boundaries are explicit and
-// step-scoped here, so nothing has to be inferred.
+// Boundaries are explicit and step-scoped here, so nothing has to be inferred.
 type decodeState struct {
 	Started bool
 }
@@ -400,7 +390,6 @@ func openPieces(index int, step wireStep) []base.Piece {
 	return pieces
 }
 
-// contentPieces renders a whole step, for the buffered path.
 func contentPieces(index int, step wireStep) []base.Piece {
 	switch step.Type {
 	case stepModelOutput:
@@ -433,17 +422,14 @@ func deltaPieces(index int, delta wireDelta) []base.Piece {
 	return nil
 }
 
-// outcomePieces maps the interaction status. The terminal event is always
-// interaction.completed; the outcome lives in the payload, so a decoder that
-// expects distinct terminal event names is wrong.
+// The terminal event is always interaction.completed and the outcome lives in
+// the payload; there are no distinct terminal event names.
 func outcomePieces(interaction wireInteraction) []base.Piece {
 	pieces := []base.Piece{}
 	if usage := interaction.Usage; usage != nil {
-		// The answer and the thinking arrive as siblings here; Responses counts
-		// the thinking inside the output, so they are added. The trailing zero is
-		// a write count this API does not report — it names only what a read
-		// saved, which is the same silence a caller gets for marking a request
-		// against it at all.
+		// The answer and the thinking arrive as siblings here and Responses
+		// counts thinking inside the output, so they are added. This API reports
+		// no cache write count, only what a read saved.
 		pieces = append(pieces, base.UsagePiece(base.CountUsage(
 			usage.TotalInputTokens,
 			usage.TotalOutputTokens+usage.TotalThoughtTokens,

@@ -5,19 +5,8 @@ import (
 	"encoding/json"
 )
 
-// Patch applies a set of top-level changes to a body, returning it byte for
-// byte unchanged when there is nothing to change. A change decodes the body one
-// key at a time into bytes rather than into the typed request, so what it does
-// not name survives it: nested values arrive as the caller wrote them, a
-// top-level key the base does not model is carried across, and the top-level
-// key order is the only thing a change costs. That is what makes the
-// openai-responses path equivalent rather than merely close.
-//
-// The re-encode runs with HTML escaping off, which is what makes that claim
-// hold at the byte level: the default rewrites <, >, & and the two line
-// separators inside every string it passes, prompt text included, so a body
-// whose model was rewritten would reach the backend with its content edited
-// too.
+// HTML escaping is off because Go's default rewrites <, >, & and the two line
+// separators inside every string it encodes, prompt text included.
 func Patch(raw json.RawMessage, changes map[string]any) (json.RawMessage, error) {
 	if len(changes) == 0 && len(raw) > 0 {
 		return raw, nil
@@ -48,12 +37,8 @@ func Patch(raw json.RawMessage, changes map[string]any) (json.RawMessage, error)
 	return json.RawMessage(bytes.TrimRight(buffer.Bytes(), "\n")), nil
 }
 
-// Unmodelled lists the fields of a body that the typed base did not consume.
-// An encoder that forwards the body verbatim drops none of them; one that
-// builds a fresh body from typed fields drops all of them.
 func Unmodelled(raw json.RawMessage, typed any) ([]Drop, error) { return Diff(raw, typed) }
 
-// Differs reports whether a body's top-level key already holds a value.
 func Differs(raw json.RawMessage, key string, value any) bool {
 	object := map[string]json.RawMessage{}
 	if len(raw) > 0 {

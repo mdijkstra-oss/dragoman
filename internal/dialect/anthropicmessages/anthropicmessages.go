@@ -1,6 +1,6 @@
 // Package anthropicmessages speaks POST /v1/messages. It is the only backend
-// that requires an output cap, and the only one that nests a tool result
-// inside a user message rather than making it a sibling item.
+// that requires an output cap, and the only one that nests a tool result inside
+// a user message rather than making it a sibling item.
 package anthropicmessages
 
 import (
@@ -12,18 +12,14 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
-// Name is the dialect's value on the command line.
 const Name = "anthropic-messages"
 
 // Version is the API version header the endpoint requires; without it the
 // request is rejected before it is read.
 const Version = "2023-06-01"
 
-// DefaultMaxTokens is the cap sent when this wire format requires one and
-// neither flag nor body supplied it. A cap that has to be guessed should err
-// toward not being the thing that ruins the answer, and on a reasoning model
-// the cap covers thinking and output together, so a small one truncates
-// mid-thought.
+// On a reasoning model the cap covers thinking and output together, so a small
+// one truncates mid-thought.
 const DefaultMaxTokens = 20000
 
 func Dialect() dialect.Dialect {
@@ -31,10 +27,8 @@ func Dialect() dialect.Dialect {
 		Name:   Name,
 		Path:   "/messages",
 		KeyEnv: "ANTHROPIC_API_KEY",
-		// A request under the guessed cap may legitimately run long, and this
-		// endpoint's own SDKs require streaming at such a cap to avoid HTTP
-		// timeouts. Invisible to the caller: folding the stream yields exactly
-		// the buffered body.
+		// This endpoint's own SDKs require streaming at a cap this size, to
+		// avoid HTTP timeouts.
 		StreamUpstream: true,
 		Headers: func(key string) map[string]string {
 			return map[string]string{
@@ -50,8 +44,8 @@ func Dialect() dialect.Dialect {
 		DropTable: dialect.DropTable(map[string]base.DropReason{
 			"strict": base.DropUnsupported,
 			"name":   base.DropUnsupported,
-			// A cache_control has a type and a TTL and nothing that means
-			// OpenAI's mode, and no cache key of any kind.
+			// A cache_control has a type and a TTL, nothing meaning OpenAI's
+			// mode, and no cache key of any kind.
 			"mode":             base.DropUnsupported,
 			"prompt_cache_key": base.DropUnsupported,
 		}),
@@ -128,10 +122,8 @@ func strictness(strict bool) base.Drop {
 		Detail: Name + " carries strictness per tool: the format is enforced though the request asked it not to be"}
 }
 
-// outputCap settles the one field this wire format will not accept a request
-// without, which is why the protocol supplies its own rather than leaving it to
-// a table. The exception is the endpoint with nowhere to put one, where a cap
-// the caller supplied is reported rather than silently ignored.
+// This wire format will not accept a request without an output cap. The
+// exception is the endpoint with nowhere to put one.
 func outputCap(req base.Request, backend base.Backend) (*int, []base.Drop) {
 	if backend.NoOutputCap {
 		if req.MaxOutputTokens == nil {
@@ -146,10 +138,8 @@ func outputCap(req base.Request, backend base.Backend) (*int, []base.Drop) {
 	return &cap, nil
 }
 
-// applyTools places the caller's tools, or reports every field that depended on
-// them. A backend that resolves tool calls itself has no channel to hand one
-// back, so a tool sent there produces prose where the caller expected a call —
-// confident, well-formed, and wrong.
+// A backend that resolves tool calls itself has no channel to hand one back, so
+// a tool sent there produces prose where the caller expected a call.
 func applyTools(body *wireRequest, req base.Request, backend base.Backend) []base.Drop {
 	if backend.NoTools {
 		return toolless(req, backend)
@@ -167,9 +157,6 @@ func applyTools(body *wireRequest, req base.Request, backend base.Backend) []bas
 	return drops
 }
 
-// toolless reports each field the caller set that only tools could have served.
-// Tool calls and results already in the input are untouched: replaying a
-// history costs the backend nothing, and only a fresh call is impossible.
 func toolless(req base.Request, backend base.Backend) []base.Drop {
 	drops := []base.Drop{}
 	for index := range req.Tools {
@@ -185,9 +172,8 @@ func toolless(req base.Request, backend base.Backend) []base.Drop {
 	return drops
 }
 
-// checkTurns refuses a history a one-turn backend would misread. Dropping a
-// user message would change the conversation and sending it would run an extra
-// turn whose answer the caller never asked for, so neither is a drop.
+// A one-turn backend runs a turn per user message. Dropping one changes the
+// conversation and sending one runs an extra turn nobody asked for.
 func checkTurns(req base.Request, backend base.Backend) error {
 	if !backend.OneTurnPerRequest {
 		return nil
@@ -204,10 +190,6 @@ func checkTurns(req base.Request, backend base.Backend) error {
 		backend.Name, len(starts), strings.Join(paths, ", "))
 }
 
-// userTurnStarts reports the input index that opens each user turn, after
-// consecutive items on the same side have collapsed into one message. The
-// encoder groups by the same rule, so the count is the number of turns the
-// backend would actually run.
 func userTurnStarts(items []base.Item) []int {
 	starts := []int{}
 	previous := ""
@@ -266,18 +248,12 @@ func assistantTurn(base.Item) string { return base.RoleAssistant }
 
 func userTurn(base.Item) string { return base.RoleUser }
 
-// cannot reports a field this particular endpoint can never carry. The reason
-// is unsupported rather than unimplemented because no amount of work in
-// dragoman would add the capability.
 func cannot(backend base.Backend, path, detail string) base.Drop {
 	return base.Drop{Path: path, Reason: base.DropUnsupported, Detail: backend.Name + " " + detail}
 }
 
-// buildMessages groups the base's flat item list into this dialect's turns. A
-// tool result must sit in the user message that immediately follows the
-// assistant message holding its call, so consecutive items of the same side
-// collapse into one turn; an input that separates them is the caller's
-// ordering and the backend rejects it in its own words.
+// A tool result must sit in the user message immediately following the assistant
+// message holding its call.
 func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error) {
 	system := ""
 	if req.Instructions != nil {
@@ -304,9 +280,7 @@ func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error)
 			}
 		},
 		Reasoning: func(item base.Item) {
-			// Whatever the backend returned as state goes back unaltered and
-			// in position: the signature is byte-identical or the request is
-			// rejected.
+			// The signature goes back byte-identical or the request is rejected.
 			if turnRole(item) == "" {
 				return
 			}
@@ -361,9 +335,9 @@ func textBlocks(item base.Item, ttl *string) []wireBlock {
 		block := wireBlock{Type: "text", Text: part.Text}
 		if part.Marks() {
 			// The TTL is request-wide at the other end and per breakpoint here,
-			// so the one value fans out onto every marker. Absent stays absent:
-			// a type alone gets this endpoint's own default, which is why
-			// spelling out a 30m is refused where omitting it succeeds.
+			// so one value fans out onto every marker. A type alone gets this
+			// endpoint's default, which is why a spelled-out 30m is refused
+			// where omitting it succeeds.
 			block.CacheControl = &wireCacheControl{Type: "ephemeral", TTL: ttl}
 		}
 		blocks = append(blocks, block)
@@ -388,17 +362,14 @@ func markerDrops(items []base.Item) []base.Drop {
 			path := dialect.MarkerPath(index, position)
 			if part.Text == "" {
 				// A cache_control rides on a text block, and this part has no
-				// text to make one out of. The marker is the caller's spending
-				// decision, so it is named rather than moved onto a neighbour.
+				// text to make one out of.
 				drops = append(drops, base.Drop{Path: path, Reason: base.DropUnsupported,
 					Detail: Name + " marks a text block, and this part carries no text"})
 				continue
 			}
 			if turnRole(item) == "" {
-				// The item feeds the system prompt, which this dialect keeps as
-				// one string. Marking a system block is expressible here and not
-				// in the base, so once the text is folded in there is no block
-				// left to put a marker on.
+				// The system prompt is one string here, so once the text is
+				// folded in there is no block left to mark.
 				drops = append(drops, base.Drop{Path: path, Reason: base.DropUnimplemented,
 					Detail: Name + " keeps instructions in system, which carries no block to mark"})
 				continue
@@ -409,8 +380,6 @@ func markerDrops(items []base.Item) []base.Drop {
 	return drops
 }
 
-// placedAny reports whether a cache_control reached the wire, which is the only
-// thing that makes the request-wide TTL a value this dialect carried.
 func placedAny(messages []wireMessage) bool {
 	for _, message := range messages {
 		for _, block := range message.Content {
@@ -462,9 +431,8 @@ func toolChoice(req base.Request) *wireToolChoice {
 	return choice
 }
 
-// decodeState holds what is bounded by one message: the input token counts seen
-// at message_start, which the terminal frame has to be combined with because
-// the two halves of usage arrive on different frames.
+// The two halves of usage arrive on different frames: input counts at
+// message_start, the rest at the terminal frame.
 type decodeState struct {
 	InputTokens   int
 	CachedTokens  int
@@ -633,19 +601,15 @@ func deltaPieces(index int, delta wireDelta) []base.Piece {
 	return nil
 }
 
-// outcomePiece maps a provider stop reason onto one of the three base
-// statuses. An unknown value is not dragoman's business: it passes through as
-// a completed response rather than crashing a decoder.
 var stopReasons = map[string]string{
 	"max_tokens":                    "max_output_tokens",
 	"refusal":                       "refusal",
 	"model_context_window_exceeded": "model_context_window_exceeded",
 }
 
-// kindOf maps a block type onto a base item. Anthropic emits block types
-// dragoman does not move — redacted_thinking, server tool results — and
-// guessing one of them into a message would put an empty assistant turn in the
-// answer. An unmapped block is skipped and reported instead.
+// Anthropic emits block types dragoman does not move — redacted_thinking, server
+// tool results — and guessing one into a message would put an empty assistant
+// turn in the answer.
 func kindOf(blockType string) base.ItemType {
 	return blockKinds[blockType]
 }
@@ -667,9 +631,8 @@ func blockDrops(raw json.RawMessage, block wireBlock, index int) []base.Drop {
 type wireRequest struct {
 	Model string `json:"model,omitempty"`
 
-	// MaxTokens is a pointer because one endpoint serving this shape requires
-	// it and another has nowhere to put it. Zero is not a cap either backend
-	// would accept, so absent has to be spelled as absent.
+	// One endpoint serving this shape requires a cap and another has nowhere to
+	// put it. Zero is not a cap either would accept.
 	MaxTokens *int `json:"max_tokens,omitempty"`
 
 	System       string            `json:"system,omitempty"`
@@ -700,8 +663,7 @@ type wireBlock struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 
-	// Caller rides on every tool_use block. Modelling it keeps it out of the
-	// drop diff on every single tool call; it is optional on the way back.
+	// Rides on every tool_use block, and is optional on the way back.
 	Caller *wireCaller `json:"caller,omitempty"`
 
 	// CacheControl is this dialect's breakpoint, placed on the block the caller
@@ -722,10 +684,9 @@ type wireCacheControl struct {
 	TTL  *string `json:"ttl,omitempty"`
 }
 
-// MarshalJSON emits only the fields that belong to a block's type. A thinking
-// block must carry its text even when the backend returned none, because the
-// field is required on the way back in; a text block must not carry it at all.
-// Selection is a dispatch table rather than a switch (R-4).
+// A thinking block must carry its text even when the backend returned none,
+// because the field is required on the way back in. A text block must not carry
+// it at all.
 func (b wireBlock) MarshalJSON() ([]byte, error) {
 	if shape, known := blockShapes[b.Type]; known {
 		return json.Marshal(shape(b))
@@ -736,9 +697,6 @@ func (b wireBlock) MarshalJSON() ([]byte, error) {
 
 var blockShapes = map[string]func(wireBlock) any{
 	"text": func(b wireBlock) any {
-		// The marker is omitted when there is none, which is what keeps a
-		// request with no breakpoint byte-identical to one built before they
-		// existed.
 		return struct {
 			Type         string            `json:"type"`
 			Text         string            `json:"text"`
@@ -753,9 +711,6 @@ var blockShapes = map[string]func(wireBlock) any{
 		}{b.Type, b.Thinking, b.Signature}
 	},
 	"tool_use": func(b wireBlock) any {
-		// Caller is omitted when dragoman builds the block and present when it
-		// decoded one, which keeps an outbound request clean while still
-		// showing the diff that the field was consumed.
 		return struct {
 			Type   string          `json:"type"`
 			ID     string          `json:"id"`
@@ -821,9 +776,8 @@ type wireUsage struct {
 	InputTokens          int `json:"input_tokens"`
 	OutputTokens         int `json:"output_tokens"`
 	CacheReadInputTokens int `json:"cache_read_input_tokens"`
-	// CacheCreationInputTokens is the flat total. This endpoint also splits the
-	// writes by TTL bucket under cache_creation; the base reads the total and
-	// not the buckets — one field, one meaning, and no arithmetic.
+	// This endpoint also splits the writes by TTL bucket under cache_creation.
+	// The base reads the flat total and not the buckets.
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	Details                  struct {
 		ThinkingTokens int `json:"thinking_tokens"`

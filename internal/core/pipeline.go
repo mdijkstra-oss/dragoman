@@ -10,33 +10,21 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/dialect"
 )
 
-// Catalog is the set of dialects dragoman knows and the presets that name
-// backends built out of them. Presets are a convenience and must stay one:
-// anything a preset does has to be expressible in flags, so that an endpoint
-// nobody anticipated is a command line rather than a patch.
 type Catalog struct {
 	Dialects  map[string]dialect.Dialect
 	Presets   map[string]base.Backend
 	Executors Executors
 }
 
-// Executors resolves an endpoint's scheme onto the thing that reaches it.
-// Selection is a dispatch table rather than a branch on the endpoint, so a
-// backend that is a process rather than a URL is a table entry.
 type Executors map[string]Executor
 
-// Sink receives each event as it is produced. The core yields events and never
-// decides when they reach a file descriptor.
 type Sink func(base.Event) error
 
 type Result struct {
 	Response *base.Response
 
-	// Usage is what the exchange cost, whichever framing the caller asked for.
-	// A streamed answer is delivered as events and leaves no response body
-	// behind, so a caller reading the counts off the response would find them
-	// only on the requests that did not stream — and the numbers are the same
-	// numbers either way.
+	// A streamed answer leaves no response body behind, and the counts are the
+	// same either way.
 	Usage *base.Usage
 
 	Drops    []base.Drop
@@ -44,8 +32,6 @@ type Result struct {
 	Received json.RawMessage
 }
 
-// SelectBackend resolves a backend from a preset and the flags that override
-// it. A backend is a dialect at a URL with a key in the environment.
 func SelectBackend(catalog Catalog, opts Options) (base.Backend, error) {
 	backend := base.Backend{}
 	if opts.Preset != "" {
@@ -79,13 +65,8 @@ func SelectBackend(catalog Catalog, opts Options) (base.Backend, error) {
 	return backend, nil
 }
 
-// withSchemeLimits adds what follows from how a backend is reached rather than
-// from which endpoint it is. A locally installed agent CLI resolves its own
-// tools, takes no output cap and runs a turn per user message. Those are facts
-// about spawning such a binary, so the table entry that names one and the flags
-// that name the same one carry them identically — and getting them wrong is the
-// confident, well-formed, wrong answer this design exists to prevent, which is
-// too much to leave to whether the table was used.
+// A locally installed agent CLI resolves its own tools, takes no output cap and
+// runs a turn per user message.
 func withSchemeLimits(backend base.Backend) base.Backend {
 	if !base.IsSpawned(backend.Endpoint) {
 		return backend
@@ -97,11 +78,8 @@ func withSchemeLimits(backend base.Backend) base.Backend {
 	return reached
 }
 
-// keyEnvFor names the variable a backend authenticates with, or the empty
-// string when it holds its own credential. A locally installed CLI does: it was
-// signed in once, interactively, and there is no key to find. The scheme
-// decides rather than the table, so that a backend named in flags and the same
-// backend named in the table authenticate identically.
+// A locally installed CLI was signed in once, interactively, and there is no key
+// to find.
 func keyEnvFor(backend base.Backend, spoken dialect.Dialect) string {
 	if base.IsSpawned(backend.Endpoint) {
 		return ""
@@ -112,9 +90,6 @@ func keyEnvFor(backend base.Backend, spoken dialect.Dialect) string {
 	return spoken.KeyEnv
 }
 
-// Translate builds the backend request out of the base request and reports
-// what could not be carried into it. This is the whole pipeline minus the
-// network.
 func Translate(catalog Catalog, opts Options, body []byte) (base.Request, base.Backend, dialect.Dialect, dialect.Encoded, error) {
 	req, err := base.ParseRequest(body)
 	if err != nil {
@@ -137,9 +112,6 @@ func Translate(catalog Catalog, opts Options, body []byte) (base.Request, base.B
 	return req, backend, spoken, encoded, nil
 }
 
-// Run translates, executes, and decodes. When the caller asked for the event
-// sequence, each event is handed to sink as it is produced; otherwise the
-// folded response is returned.
 func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, executor Executor, sink Sink) (Result, error) {
 	req, backend, spoken, encoded, err := Translate(catalog, opts, body)
 	if err != nil {
@@ -155,8 +127,7 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 		return result, nil
 	}
 
-	// A backend that names no variable holds its own credential, and there is
-	// nothing to look up or to refuse it for.
+	// A backend naming no variable holds its own credential.
 	key := ""
 	if backend.KeyEnv != "" {
 		key = os.Getenv(backend.KeyEnv)
@@ -180,8 +151,6 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 		Stream:  upstream,
 	}
 
-	// --raw returns the backend's own bytes, so the translated event sequence
-	// is not also written.
 	round, err := exchange(ctx, reach, spoken, call, wantsEvents && !opts.Raw, sink)
 	result.Received = round.Received
 	if err != nil {
@@ -205,18 +174,13 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 	if !wantsEvents {
 		result.Response = &folded
 	}
-	// The backend said no in the body rather than in the status line. That is
-	// still the backend saying no, and a CI step gating on the exit code has
-	// to see it.
+	// A provider error can arrive inside a 200.
 	if folded.Status == base.StatusFailed || folded.Error != nil {
 		return result, Fail(ExitBackend, "backend reported an error: %s", errorText(folded))
 	}
 	return result, nil
 }
 
-// resolveExecutor picks how the backend is reached. A supplied executor wins,
-// so that a recorded exchange can be replayed without a network or a
-// subprocess; otherwise the endpoint's scheme selects one from the table.
 func resolveExecutor(catalog Catalog, backend base.Backend, supplied Executor) (Executor, error) {
 	if supplied != nil {
 		return supplied, nil
@@ -229,9 +193,6 @@ func resolveExecutor(catalog Catalog, backend base.Backend, supplied Executor) (
 	return chosen, nil
 }
 
-// targetOf names where the backend is. A path belongs to an HTTP operation and
-// a process is reached by name, so the scheme decides whether the dialect's
-// path is appended to the endpoint.
 func targetOf(spoken dialect.Dialect, backend base.Backend) string {
 	if base.IsSpawned(backend.Endpoint) {
 		return backend.Endpoint
@@ -249,9 +210,6 @@ func errorText(resp base.Response) string {
 	return resp.Error.Code + ": " + resp.Error.Message
 }
 
-// exchange performs the call and decodes it, streaming events to the sink when
-// the caller wants them. It returns the whole event sequence so the buffered
-// path can fold it and the streaming path can still be checked.
 func exchange(
 	ctx context.Context,
 	executor Executor,
@@ -302,7 +260,6 @@ func exchange(
 	return result, nil
 }
 
-// exchanged is what one round trip produced.
 type exchanged struct {
 	Events   []base.Event
 	Received json.RawMessage

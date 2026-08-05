@@ -1,7 +1,6 @@
-// Command dragoman translates an openai-responses request to a backend
-// speaking another protocol and translates the answer back, so the client never
-// learns which provider answered. It does that once over a pipe, or for as long
-// as it runs over HTTP.
+// Command dragoman translates an openai-responses request to a backend speaking
+// another protocol and translates the answer back, once over a pipe or for as
+// long as it runs over HTTP.
 package main
 
 import (
@@ -25,8 +24,6 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/transport/serve"
 )
 
-// CLI is the command line. It owns argv parsing, reading and writing the
-// streams, and the exit code — and owns nothing else.
 type CLI struct {
 	Translate TranslateCmd `cmd:"" default:"withargs" help:"Translate one request from stdin to stdout."`
 	Serve     ServeCmd     `cmd:"" help:"Serve the service table over HTTP."`
@@ -34,8 +31,6 @@ type CLI struct {
 	Health    HealthCmd    `cmd:"" name:"healthcheck" help:"Report whether a listener is serving."`
 }
 
-// TranslateCmd is the original command line, unchanged: it stays the default so
-// that a pipe invocation never has to name it.
 type TranslateCmd struct {
 	Protocol        string `help:"Protocol the caller speaks." default:"openai-responses" enum:"openai-responses"`
 	BackendProtocol string `help:"Protocol the backend speaks." name:"backend-protocol"`
@@ -59,23 +54,17 @@ type TranslateCmd struct {
 	ConfigFile string `help:"Service table to use instead of the built-in one." name:"config" type:"path"`
 }
 
-// ServeCmd is the HTTP surface over the same core. It binds loopback by
-// default: an instance holding provider keys that needs to be reachable belongs
-// behind something that does authentication as its actual job.
 type ServeCmd struct {
 	Addr       string `help:"Address to listen on." default:"127.0.0.1:8080"`
 	ConfigFile string `help:"Service table to serve instead of the built-in one." name:"config" type:"path"`
 	Strict     bool   `help:"Treat any dropped field as an error, for every request served."`
 }
 
-// HealthCmd lets the binary check itself. A container built on scratch holds one
-// file and no shell, so a runtime healthcheck naming any other command names one
-// the image cannot execute — and a deployment that cannot gate on readiness sends
-// its first requests to a process that has not finished binding.
+// A container built on scratch holds one file and no shell, so a runtime
+// healthcheck naming any other command names one the image cannot execute.
 //
-// It asks only whether this process is serving. Reaching a provider is deliberately
-// not part of the answer: an instance that reports itself unhealthy when a backend
-// is having a bad afternoon gets restarted for someone else's outage.
+// Reaching a provider is not part of the answer: an instance reporting itself
+// unhealthy during someone else's outage gets restarted for it.
 type HealthCmd struct {
 	Addr string `help:"Address to check." default:"127.0.0.1:8080"`
 }
@@ -96,8 +85,8 @@ func run() int {
 			"Reads an openai-responses request and returns an openai-responses response,\n"+
 			"whichever protocol the backend speaks. Credentials come from the environment."),
 		kong.UsageOnError(),
-		// kong's own failure path exits 1, which is reserved here for "the
-		// backend said no". Bad flags are a dragoman failure and must be 2.
+		// kong's own failure path exits 1, which is reserved for the backend
+		// saying no.
 		kong.Exit(func(code int) { panic(usageExit{code: code}) }),
 	)
 	if err != nil {
@@ -147,9 +136,6 @@ func translateCommand(cli TranslateCmd) int {
 	defer buffered.Flush()
 
 	streams := pipe.Streams{In: input, Out: buffered, Err: os.Stderr}
-	// How a backend is reached follows from its endpoint, which the core
-	// resolves against the table; the CLI owns argv, the streams and the exit
-	// code, and nothing else.
 	return pipe.Run(context.Background(), known, options, streams, nil,
 		pipe.Report{Verbose: cli.Verbose, Timing: cli.Timing})
 }
@@ -163,8 +149,6 @@ func serveCommand(cli ServeCmd) int {
 	if err != nil {
 		return fail(err)
 	}
-	// JSON, because the accounting line is the thing a deployment aggregates,
-	// and a format only a human reads is a format nothing counts.
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	handler := serve.New(serve.Config{
 		Catalog:    known,
@@ -174,8 +158,8 @@ func serveCommand(cli ServeCmd) int {
 	})
 	log.Info("serving", "services", names(known), "addr", cli.Addr)
 
-	// No write timeout: an answer may legitimately run long, and a deadline
-	// here would truncate a stream the caller is still reading.
+	// An answer may legitimately run long, and a deadline here would truncate a
+	// stream the caller is still reading.
 	server := &http.Server{Addr: cli.Addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if err := server.ListenAndServe(); err != nil {
 		return fail(err)
@@ -192,9 +176,6 @@ func names(known core.Catalog) []string {
 	return served
 }
 
-// healthCommand asks the liveness route the question a runtime asks, and answers in
-// the only vocabulary a runtime reads: the exit code. The timeout is short because
-// the question is whether a listener answers, not whether it answers quickly.
 func healthCommand(cli HealthCmd) int {
 	client := &http.Client{Timeout: healthTimeout}
 	response, err := client.Get("http://" + cli.Addr + "/health")
@@ -208,15 +189,11 @@ func healthCommand(cli HealthCmd) int {
 	return int(core.ExitOK)
 }
 
-// healthTimeout is short because the question is whether a listener answers, not
-// whether it answers quickly. A check that outlasts the interval it runs on stops
-// reporting the state it was asked about.
+// A check that outlasts the interval it runs on stops reporting the state it was
+// asked about.
 const healthTimeout = 2 * time.Second
 
-// unhealthy answers in the only vocabulary a container runtime reads. The code is
-// neither of dragoman's own: a listener that is not up is not a usage error, and
-// nothing here asked a backend anything. One is what every runtime reads as
-// unhealthy, and the only value that has ever meant it.
+// One is what every container runtime reads as unhealthy.
 func unhealthy(err error) int {
 	fmt.Fprintf(os.Stderr, "dragoman: %s\n", err)
 	return 1
@@ -231,8 +208,6 @@ func configCommand(cli ConfigCmd) int {
 		}
 		document = read
 	}
-	// Parsed before it is printed, so that printing a table is also a way to
-	// find out whether dragoman can serve it.
 	if _, err := catalog.Load(document); err != nil {
 		return fail(err)
 	}
@@ -240,9 +215,6 @@ func configCommand(cli ConfigCmd) int {
 	return int(core.ExitOK)
 }
 
-// table resolves the service table an invocation runs against. A file replaces
-// the built-in one wholesale: the file in front of you is the whole answer to
-// what this instance serves.
 func table(path string) (core.Catalog, error) {
 	if path == "" {
 		return catalog.New(), nil
@@ -258,8 +230,6 @@ func table(path string) (core.Catalog, error) {
 	return core.Catalog{Dialects: catalog.Dialects(), Presets: services, Executors: catalog.Executors()}, nil
 }
 
-// parse runs kong and converts its exit into dragoman's own, so that a bad flag
-// never surfaces as the code reserved for a backend refusal.
 func parse(parser *kong.Kong, args []string) (command string, code int, parsed bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -267,8 +237,6 @@ func parse(parser *kong.Kong, args []string) (command string, code int, parsed b
 			if !isUsage {
 				panic(recovered)
 			}
-			// Help and version leave through kong's zero; anything else is a
-			// dragoman failure and must not borrow the backend's code.
 			if exit.code == 0 {
 				command, code, parsed = "", int(core.ExitOK), false
 				return
@@ -318,5 +286,4 @@ func fail(err error) int {
 	return int(core.CodeOf(err))
 }
 
-// usageExit is how kong's exit is caught so dragoman owns the code.
 type usageExit struct{ code int }

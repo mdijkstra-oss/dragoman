@@ -1,6 +1,3 @@
-// Package base is the openai-responses format. It is not a format modelled on
-// Responses; it is the same format. Dialect packages encode requests out of it
-// and decode responses into it, and nothing else imports anything above it.
 package base
 
 import (
@@ -9,8 +6,6 @@ import (
 	"strings"
 )
 
-// ItemType names the bounded set of items dragoman moves. No item type is ever
-// dropped: every dialect has all four shapes in some spelling.
 type ItemType string
 
 const (
@@ -53,24 +48,16 @@ type Item struct {
 
 	Summary []ContentPart `json:"summary,omitempty"`
 
-	// EncryptedContent is the provider state pocket. Whatever a backend
-	// returned as state goes back to that backend unaltered and in position;
-	// dragoman never inspects it.
+	// Providers require their own state back unaltered and in position.
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
-// ContentPart is one part of a message's content or a reasoning summary.
 type ContentPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 
-	// PromptCacheBreakpoint marks this part as the end of a prefix worth
-	// caching. It is carried as bytes rather than modelled because a decoder
-	// reads whether a breakpoint is present and never what its mode means: the
-	// dialects that spell the field OpenAI's way forward these bytes unchanged,
-	// and the one that spells it differently places its own marker and reports
-	// what it could not carry. dragoman never adds one — it is a spending
-	// decision, so this only ever holds what the caller sent.
+	// Placing a breakpoint buys a cache write, so this holds only what the
+	// caller sent.
 	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
 }
 
@@ -116,16 +103,12 @@ func FilterItems(items []Item, keep func(Item) bool) []Item {
 func (i Item) MarshalJSON() ([]byte, error) {
 	shape, known := itemShapes[i.Type]
 	if !known {
-		// A provider is free to add an item type dragoman does not move. That
-		// is the provider's set, not dragoman's, so it is reported as a drop
-		// rather than crashing the decoder.
+		// A provider is free to add an item type dragoman does not move.
 		return json.Marshal(unknownShape{Type: i.Type, ID: i.ID, Status: i.Status})
 	}
 	return json.Marshal(shape(i))
 }
 
-// IsKnownItemType reports whether dragoman moves this item type. Decoders use
-// it to skip what they cannot map instead of guessing at it.
 func IsKnownItemType(itemType ItemType) bool {
 	_, known := itemShapes[itemType]
 	return known
@@ -177,8 +160,6 @@ type wireItem struct {
 	EncryptedContent string          `json:"encrypted_content"`
 }
 
-// itemShapes is a dispatch table rather than a switch so that adding an item
-// type is a table entry (R-4). An absent entry panics (R-12).
 var itemShapes = map[ItemType]func(Item) any{
 	ItemMessage: func(i Item) any {
 		return messageShape{
@@ -227,9 +208,8 @@ type callShape struct {
 	CallID    string   `json:"call_id"`
 	Name      string   `json:"name"`
 	Arguments string   `json:"arguments"`
-	// A provider that binds its state to the call rather than to a preceding
-	// reasoning item keeps it here. Provider state is a field on an item, and
-	// the item it arrived on is the item it goes back on.
+	// Gemini binds its thought signature to the call rather than to a preceding
+	// reasoning item.
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 

@@ -7,40 +7,22 @@ import (
 	"strings"
 )
 
-// DropReason separates the kinds of drop, because they have opposite
-// lifetimes. Without the distinction the backlog is invisible inside a list of
-// permanent impossibilities, and both are invisible inside a list of fields
-// whose going missing changed nothing.
 type DropReason string
 
 const (
-	// DropUnsupported: the target dialect has no equivalent and never will.
-	DropUnsupported DropReason = "unsupported"
-	// DropUnimplemented: dragoman could map it and does not yet.
+	DropUnsupported   DropReason = "unsupported"
 	DropUnimplemented DropReason = "unimplemented"
-	// DropInert: the target dialect has no equivalent and needs none, because
-	// the field could not have changed the answer — a label on a schema, or a
-	// flag asking for behaviour the target has anyway. Recorded, not raised.
-	DropInert DropReason = "inert"
+	DropInert         DropReason = "inert"
 )
 
-// Drop is a field present in a body that no typed field consumed. Entries
-// carry a path, not a name, because skip-and-continue makes this the caller's
-// only signal.
 type Drop struct {
 	Path   string     `json:"path"`
 	Reason DropReason `json:"reason"`
 	Detail string     `json:"detail,omitempty"`
 }
 
-// Notable reports whether a drop is worth interrupting a reader for. Only an
-// inert drop is not: nothing about the request or the answer differs for its
-// absence, so warning about it teaches a caller to ignore warnings.
 func (d Drop) Notable() bool { return d.Reason != DropInert }
 
-// PartitionDrops splits drops into the ones that changed the exchange and the
-// ones that could not have. Transports report the first at their loud level
-// and the second at their quiet one; neither is thrown away.
 func PartitionDrops(drops []Drop) (notable, inert []Drop) {
 	for _, drop := range drops {
 		if drop.Notable() {
@@ -52,10 +34,6 @@ func PartitionDrops(drops []Drop) (notable, inert []Drop) {
 	return notable, inert
 }
 
-// Diff computes the dropped fields of a body against the typed value that
-// consumed it. It is computed, never hand-maintained, so an unmapped field is
-// loud by default and adding support for it means adding a typed field and
-// watching it stop appearing.
 func Diff(raw json.RawMessage, typed any) ([]Drop, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -77,10 +55,6 @@ func Diff(raw json.RawMessage, typed any) ([]Drop, error) {
 	return drops, nil
 }
 
-// Classify assigns each drop its reason from a per-dialect table keyed by the
-// leaf field name. The diff cannot tell the two kinds apart; the dialect table
-// says which. Anything the table does not name is unimplemented, so the
-// backlog stays visible.
 func Classify(drops []Drop, table map[string]DropReason) []Drop {
 	classified := make([]Drop, 0, len(drops))
 	for _, drop := range drops {
@@ -168,12 +142,8 @@ func walk(path string, source, consumed any, drops []Drop) []Drop {
 	return drops
 }
 
-// carriesNothing reports whether a value could not have carried an answer. A
-// key present on the wire as null, an empty string, an empty array or an empty
-// object cannot produce a confident, well-formed, wrong result by going
-// missing, and reporting it would bury the drops that can — a block announced
-// as {"text": ""} at open is the same block whose text arrives as deltas, and
-// an empty input list is consumed rather than lost.
+// A block announced as {"text": ""} at open is the same block whose text
+// arrives as deltas, and an empty input list is consumed rather than lost.
 func carriesNothing(value any) bool {
 	switch typed := value.(type) {
 	case nil:

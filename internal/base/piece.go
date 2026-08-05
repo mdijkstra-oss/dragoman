@@ -1,7 +1,5 @@
 package base
 
-// PieceKind names what a decoder recognised happening. A dialect decoder
-// shrinks to recognising these and calling in; the emitter does the rest.
 type PieceKind string
 
 const (
@@ -17,10 +15,6 @@ const (
 	PieceOutcome PieceKind = "outcome"
 )
 
-// Piece is the one vocabulary both paths speak. The streaming decoder produces
-// pieces from wire frames and the buffered decoder produces the same pieces
-// from a whole body, so the mapping is written once and the fold invariant
-// holds by construction rather than by agreement.
 type Piece struct {
 	Kind PieceKind
 
@@ -46,8 +40,6 @@ func Start(id, model string, createdAt int64) Piece {
 	return Piece{Kind: PieceStart, ID: id, Model: model, CreatedAt: createdAt}
 }
 
-// OpenPiece announces an item boundary the dialect read or inferred. The id is
-// minted by the emitter.
 func OpenPiece(key string, kind ItemType) Piece {
 	return Piece{Kind: PieceOpen, Key: key, ItemKind: kind}
 }
@@ -88,9 +80,6 @@ func OutcomePiece(status string, incomplete *IncompleteDetails, err *ResponseErr
 	return Piece{Kind: PieceOutcome, Status: status, Incomplete: incomplete, Error: err}
 }
 
-// Apply folds one piece into the emitter. Selection is a dispatch table, not a
-// switch on a type value (R-4); an unknown kind panics, because the piece
-// vocabulary is a set dragoman owns (R-12).
 func Apply(e Emitter, piece Piece) (Emitter, []Event) {
 	handler, known := pieceHandlers[piece.Kind]
 	if !known {
