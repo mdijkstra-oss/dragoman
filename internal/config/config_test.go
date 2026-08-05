@@ -44,7 +44,7 @@ func TestDefaultTableIsTheShippedBackends(t *testing.T) {
 		},
 		"deepseek": {
 			Name: "deepseek", Dialect: "openai-completions",
-			Endpoint: "https://api.deepseek.com", KeyEnv: "DEEPSEEK_API_KEY", NoSchema: true,
+			Endpoint: "https://api.deepseek.com", KeyEnv: "DEEPSEEK_API_KEY", SchemaAsPrompt: true,
 		},
 		"openrouter": {
 			Name: "openrouter", Dialect: "openai-completions",

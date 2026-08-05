@@ -20,10 +20,9 @@ type Backend struct {
 	Endpoint string
 	KeyEnv   string
 
-	// NoSchema marks an endpoint with no structured-output mode. It is a
-	// capability rather than a placement, so it cannot live in the protocol:
-	// DeepSeek and OpenRouter serve the same wire format and disagree about it.
-	NoSchema bool
+	// DeepSeek's JSON mode takes no schema and asks for the shape in the prompt.
+	// DeepSeek and OpenRouter serve the same wire format and disagree about this.
+	SchemaAsPrompt bool
 
 	// An agent harness resolves its own tool calls and has no channel to hand
 	// one back.

@@ -17,8 +17,10 @@ loop, no tools executed on the caller's behalf. Everything needed to answer is
 in the body that arrived, which is what makes the binary interchangeable with
 the endpoint it stands in front of.
 
-dragoman moves structure and never meaning. Values pass through untranslated,
-prompts are never written, capabilities are never emulated.
+dragoman moves structure and never meaning. Values pass through untranslated and
+capabilities are never emulated, with one exception a service opts into by name:
+[`schema_as_prompt`](#services), for an endpoint whose JSON mode has to be told
+the shape in words.
 
 ## Dialects
 
@@ -62,7 +64,7 @@ openrouter:
 | `endpoint` | base URL; the operation path belongs to the protocol |
 | `protocol` | one of the five above |
 | `auth` | **name of the environment variable** holding the key, never the key |
-| `no_schema` | optional; this endpoint has no structured-output mode |
+| `schema_as_prompt` | optional; this endpoint has a JSON mode and no schema mode |
 
 Three keys carry every service, and one endpoint sets the fourth:
 
@@ -70,9 +72,30 @@ Three keys carry every service, and one endpoint sets the fourth:
 
 Which field the output cap lands in, whether usage must be asked for while
 streaming, whether to stream upstream at all — placement, every one, and the
-protocol owns them. `no_schema` is the one thing that fails that test: DeepSeek
-and OpenRouter both speak `openai-completions` and disagree about `json_schema`,
-so no protocol can know it.
+protocol owns them. `schema_as_prompt` is the one thing that fails that test:
+DeepSeek and OpenRouter both speak `openai-completions` and disagree about
+`json_schema`, so no protocol can know it.
+
+Omitting it is the default and means false, which is legal on every protocol —
+most services never name the key. Writing `true` is what carries a claim, and it
+is a claim only `openai-completions` can honour, so it fails at load anywhere
+else: exit `2`, naming the service and the protocol it named.
+
+```console
+$ dragoman serve --config ./bad.yaml
+dragoman: config: service "anthropic" sets schema_as_prompt on protocol "anthropic-messages" (only openai-completions has a JSON mode to fall back to)
+```
+
+A `json_schema` arriving for a service that did set it becomes two things:
+`response_format` of `{"type": "json_object"}`, and the schema itself written
+into `instructions` behind whatever prompt the caller sent. Both halves are
+required — the mode alone yields JSON of any shape, and the prompt alone yields
+prose that happens to contain some.
+
+> [!IMPORTANT]
+> A schema in a prompt is a request, not a constraint, and `strict` is gone with
+> the field that carried it. The drop is recorded on every such request so the
+> caller knows the enforcement it asked for is not there.
 
 The shipped table:
 
@@ -85,7 +108,7 @@ The shipped table:
 | `deepseek` | `openai-completions` | `DEEPSEEK_API_KEY` |
 | `openrouter` | `openai-completions` | `OPENROUTER_API_KEY` |
 
-`deepseek` carries `no_schema: true`; nothing else needs a fourth key. The table
+`deepseek` carries `schema_as_prompt: true`; nothing else needs a fourth key. The table
 ships embedded in the binary, and `--config` **replaces** it wholesale — there is
 no merge and no Go map beside it, so the file in front of you is the whole
 answer to what this instance serves. The consequence to accept is that a config
@@ -357,11 +380,12 @@ request of a kind is how the warning that matters gets skimmed past.
 `--strict` makes any drop an error, inert included: exit `2`, nothing sent. The
 flag is for the caller who wants to hear about every difference.
 
-A schema sent to a service marked `no_schema` is the one drop that is the
-designed outcome: `text.format` goes, the drop is recorded, and the caller gets a
-`200` and prose. Prose where JSON was expected reads as a model quirk the caller
-adapts to; a refusal dragoman invented on the provider's behalf reads as
-dragoman being broken. `--strict` promotes it like any other.
+A schema sent to a service marked `schema_as_prompt` is the one drop that is the
+designed outcome: `text.format` goes, the drop is recorded, and the shape reaches
+the model as prose instead. What the caller loses is enforcement, which is worth
+saying on every request — an answer that is valid JSON of the wrong shape is a
+parse failure with nothing in the exchange to explain it. `--strict` promotes it
+like any other.
 
 ## Diagnostics
 

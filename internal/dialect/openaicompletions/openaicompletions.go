@@ -4,6 +4,7 @@
 package openaicompletions
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -83,7 +84,7 @@ func encode(spoken wireQuirks, req base.Request, backend base.Backend, stream bo
 	}
 	drops = append(drops, dialect.Unread(req, placedFields)...)
 
-	messages, itemDrops, err := buildMessages(req)
+	messages, itemDrops, err := buildMessages(req, schemaInstruction(req, backend))
 	if err != nil {
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", spoken.name, err)
 	}
@@ -126,11 +127,11 @@ func encode(spoken wireQuirks, req base.Request, backend base.Backend, stream bo
 	}
 
 	if format := base.GetFormat(req); format != nil && format.Type == "json_schema" {
-		if backend.NoSchema {
-			// dragoman does not write prompts, so the documented workaround of
-			// naming the shape in the message is not available. Dropping beats
-			// forwarding: prose reads as a model quirk the caller adapts to,
-			// where a refusal dragoman provoked reads as dragoman being broken.
+		if backend.SchemaAsPrompt {
+			// The mode constrains the answer to valid JSON and nothing more, so
+			// the shape has to arrive in the prompt. The mode alone yields JSON
+			// of any shape; the prompt alone yields prose containing some.
+			body["response_format"] = map[string]any{"type": "json_object"}
 			drops = append(drops, base.Drop{
 				Path:   "text.format",
 				Reason: base.DropUnsupported,
@@ -155,14 +156,35 @@ func encode(spoken wireQuirks, req base.Request, backend base.Backend, stream bo
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
 }
 
-// buildMessages flattens the base's item list into the role-tagged messages
-// this dialect expects. Consecutive assistant-side items collapse into one
-// message so that a call and the text preceding it stay in the same turn, and
-// text accumulates rather than replacing what is already there.
-func buildMessages(req base.Request) ([]wireMessage, []base.Drop, error) {
+// DeepSeek's JSON mode requires the word json to appear in the prompt.
+func schemaInstruction(req base.Request, backend base.Backend) string {
+	if !backend.SchemaAsPrompt {
+		return ""
+	}
+	format := base.GetFormat(req)
+	if format == nil || format.Type != "json_schema" || len(format.Schema) == 0 {
+		return ""
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, format.Schema, "", "  "); err != nil {
+		// Unindentable means unparseable, and it still describes the answer.
+		pretty.Write(format.Schema)
+	}
+	return "Respond with a single json object and nothing else — no prose before or after it, no code fence. " +
+		"The object must validate against this JSON Schema:\n\n" + pretty.String()
+}
+
+func buildMessages(req base.Request, schemaPrompt string) ([]wireMessage, []base.Drop, error) {
 	messages := []wireMessage{}
-	if req.Instructions != nil && *req.Instructions != "" {
-		messages = append(messages, wireMessage{Role: base.RoleSystem, Content: text(*req.Instructions)})
+	instructions := ""
+	if req.Instructions != nil {
+		instructions = *req.Instructions
+	}
+	if schemaPrompt != "" {
+		instructions = strings.TrimSpace(instructions + "\n\n" + schemaPrompt)
+	}
+	if instructions != "" {
+		messages = append(messages, wireMessage{Role: base.RoleSystem, Content: text(instructions)})
 	}
 	assistant := func() *wireMessage {
 		if len(messages) > 0 && messages[len(messages)-1].Role == base.RoleAssistant {

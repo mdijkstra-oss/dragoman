@@ -239,16 +239,27 @@ func TestDropsAreReportedWithPathsAndReasons(t *testing.T) {
 	}
 }
 
-// TestSchemaAgainstASchemalessBackendIsDropped covers the case where dragoman
-// will not write a prompt to emulate a capability: the caller gets prose, and
-// is told.
-func TestSchemaAgainstASchemalessBackendIsDropped(t *testing.T) {
+// TestSchemaAgainstASchemalessBackendBecomesAPrompt covers the one endpoint
+// that constrains output to JSON without accepting a schema. Both halves are
+// required — the mode alone yields JSON of any shape — and the caller is still
+// told the schema is no longer enforced.
+func TestSchemaAgainstASchemalessBackendBecomesAPrompt(t *testing.T) {
 	body := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],` +
 		`"text":{"format":{"type":"json_schema","name":"p","strict":true,"schema":{"type":"object"}}}}`)
 
 	sent, drops := translate(t, core.Options{Preset: "deepseek"}, body)
-	if lookup(sent, "response_format.type") != "" {
+	if got := lookup(sent, "response_format.type"); got != "json_object" {
+		t.Errorf("response_format.type = %q, want %q", got, "json_object")
+	}
+	if lookup(sent, "response_format.json_schema") != "" {
 		t.Error("a schema was forwarded to a backend with no schema mode")
+	}
+	system := lookup(sent, "messages.0.content")
+	if !strings.Contains(system, "json") {
+		t.Errorf("system message does not name json, which the mode requires: %s", system)
+	}
+	if !strings.Contains(system, `type`) || !strings.Contains(system, `object`) {
+		t.Errorf("system message does not carry the schema: %s", system)
 	}
 	if !hasDropPath(drops, "text.format") {
 		t.Errorf("schema drop was not reported: %v", drops)
@@ -257,6 +268,32 @@ func TestSchemaAgainstASchemalessBackendIsDropped(t *testing.T) {
 	sent, _ = translate(t, core.Options{Preset: "openai-chat"}, body)
 	if got := lookup(sent, "response_format.json_schema.strict"); got != "true" {
 		t.Errorf("strict = %q, want nested inside json_schema", got)
+	}
+}
+
+// TestSchemaAsPromptIsRefusedOffCompletions keeps the capability tied to the one
+// wire format that has a JSON mode to fall back to. Only true carries a claim:
+// the key omitted, or written false, says nothing and is legal everywhere, which
+// is what lets most services never name it.
+func TestSchemaAsPromptIsRefusedOffCompletions(t *testing.T) {
+	entry := "anthropic:\n  endpoint: https://api.anthropic.com/v1\n  protocol: anthropic-messages\n  auth: ANTHROPIC_API_KEY\n"
+
+	for _, quiet := range []string{entry, entry + "  schema_as_prompt: false\n"} {
+		table, err := catalog.Load([]byte(quiet))
+		if err != nil {
+			t.Fatalf("table without the claim did not load: %v", err)
+		}
+		if table["anthropic"].SchemaAsPrompt {
+			t.Error("SchemaAsPrompt is true where the table did not say so")
+		}
+	}
+
+	_, err := catalog.Load([]byte(entry + "  schema_as_prompt: true\n"))
+	if err == nil {
+		t.Fatal("schema_as_prompt on anthropic-messages loaded, want a load failure")
+	}
+	if !strings.Contains(err.Error(), "schema_as_prompt") {
+		t.Errorf("error does not name the field: %v", err)
 	}
 }
 
@@ -365,11 +402,11 @@ func TestPresetsAreExpressibleInFlags(t *testing.T) {
 	body := weatherRequest(t)
 	for _, preset := range catalog.PresetNames() {
 		backend := catalog.Presets()[preset]
-		// no_schema is a capability of an endpoint, and the only entry in the
-		// table that no flag restates. Everything else — including the output
+		// schema_as_prompt is a capability of an endpoint, and the only entry in
+		// the table that no flag restates. Everything else — including the output
 		// cap and the upstream streaming decision, which the protocol now owns
 		// — must be reachable from the command line unchanged.
-		if backend.NoSchema {
+		if backend.SchemaAsPrompt {
 			continue
 		}
 		t.Run(preset, func(t *testing.T) {
