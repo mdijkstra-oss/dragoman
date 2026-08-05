@@ -68,33 +68,33 @@ type decodeState struct {
 	Streamed []string
 }
 
-func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.Recognised, error) {
+func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.DecodedFrame, error) {
 	current, ok := state.(decodeState)
 	if !ok {
-		return state, dialect.Recognised{}, fmt.Errorf("%s: bad decoder state", Name)
+		return state, dialect.DecodedFrame{}, fmt.Errorf("%s: bad decoder state", Name)
 	}
 	if len(frame.Data) == 0 || string(frame.Data) == "[DONE]" {
-		return current, dialect.Recognised{}, nil
+		return current, dialect.DecodedFrame{}, nil
 	}
 	var event wireEvent
 	if err := json.Unmarshal(frame.Data, &event); err != nil {
-		return current, dialect.Recognised{}, fmt.Errorf("%s: event: %w", Name, err)
+		return current, dialect.DecodedFrame{}, fmt.Errorf("%s: event: %w", Name, err)
 	}
 
 	switch base.EventType(event.Type) {
 	case base.EventCreated:
 		if event.Response == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
 		return current, pieces(base.Start(event.Response.ID, event.Response.Model, event.Response.CreatedAt)), nil
 
 	case base.EventItemAdded:
 		item, present := event.item()
 		if !present {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
 		if !base.IsKnownItemType(item.Type) {
-			return current, dialect.Recognised{Drops: unmappedItem(item, itemPath(event.OutputIndex))}, nil
+			return current, dialect.DecodedFrame{Drops: unmappedItem(item, itemPath(event.OutputIndex))}, nil
 		}
 		return current, pieces(base.OpenIdentified(item.ID, item.Type, item.ID)), nil
 
@@ -110,26 +110,26 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 	case base.EventItemDone:
 		item, present := event.item()
 		if !present || !base.IsKnownItemType(item.Type) {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
-		return current, dialect.Recognised{
+		return current, dialect.DecodedFrame{
 			Pieces: closePieces(item, streamedContent(current, item.ID)),
 			Drops:  dialect.ShapeDrops(event.Item, item, itemPath(event.OutputIndex)),
 		}, nil
 
 	case base.EventCompleted, base.EventIncomplete, base.EventFailed:
 		if event.Response == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
-		return current, dialect.Recognised{Pieces: outcomePieces(*event.Response)}, nil
+		return current, dialect.DecodedFrame{Pieces: outcomePieces(*event.Response)}, nil
 	}
-	return current, dialect.Recognised{}, nil
+	return current, dialect.DecodedFrame{}, nil
 }
 
-func bodyPieces(body []byte) (dialect.Recognised, error) {
+func bodyPieces(body []byte) (dialect.DecodedFrame, error) {
 	resp, err := base.ParseResponse(body)
 	if err != nil {
-		return dialect.Recognised{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.DecodedFrame{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	built := []base.Piece{base.Start(resp.ID, resp.Model, resp.CreatedAt)}
 	skipped := []base.Drop{}
@@ -148,24 +148,21 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 		Output json.RawMessage `json:"output"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return dialect.Recognised{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.DecodedFrame{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	drops, err := base.Diff(envelope.Output, resp.Output)
 	if err != nil {
-		return dialect.Recognised{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.DecodedFrame{}, fmt.Errorf("%s: %w", Name, err)
 	}
-	return dialect.Recognised{Pieces: built, Drops: append(skipped, dialect.Prefixed(drops, "output")...)}, nil
+	return dialect.DecodedFrame{Pieces: built, Drops: append(skipped, dialect.Prefixed(drops, "output")...)}, nil
 }
 
-// unmappedItem reports an item type dragoman does not move. The base carries
-// four; anything else belongs to a capability that is out of scope, and the
-// caller is told rather than left with a silently shorter answer.
 func unmappedItem(item base.Item, path string) []base.Drop {
 	return []base.Drop{dialect.Unmapped(path, "item type", string(item.Type))}
 }
 
-func pieces(list ...base.Piece) dialect.Recognised {
-	return dialect.Recognised{Pieces: list}
+func pieces(list ...base.Piece) dialect.DecodedFrame {
+	return dialect.DecodedFrame{Pieces: list}
 }
 
 func itemPath(outputIndex *int) string {
@@ -232,7 +229,7 @@ type wireEvent struct {
 	Response    *base.Response  `json:"response"`
 }
 
-// item decodes the event's item, which every item-scoped frame carries whole.
+// Every item-scoped frame carries its item whole.
 func (e wireEvent) item() (base.Item, bool) {
 	if len(e.Item) == 0 || string(e.Item) == "null" {
 		return base.Item{}, false

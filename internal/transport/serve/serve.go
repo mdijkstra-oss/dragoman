@@ -21,14 +21,8 @@ type Config struct {
 	Executor core.Executor
 	Strict   bool
 
-	// Log carries what a request cost, what was dropped from it, and how it
-	// failed. None of it reaches the answer: a nil logger discards the lot and
-	// the caller reads the same body either way.
 	Log *slog.Logger
 
-	// LogHeaders is the allowlist of request headers the accounting line
-	// records, in the order they are written. Empty records none — see
-	// LoggedHeaders, which is where an operator's list becomes one.
 	LogHeaders []string
 }
 
@@ -95,9 +89,6 @@ func (s server) translate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The body already carries effort, cap and stream, so the pair the model
-	// was read apart into, plus the server-wide strict flag, is the whole of
-	// what the listener settles.
 	opts := core.Options{Preset: service, Model: model, Strict: s.strict}
 	clearWriteDeadline(w)
 	if core.WantsEvents(req, opts) {
@@ -195,7 +186,7 @@ func (s server) served(r *http.Request, opts core.Options, status int, elapsed t
 		"duration_ms", elapsed.Milliseconds(),
 	}
 	fields = append(fields, tokenCounts(usage)...)
-	if headers := loggedHeaders(r.Header, s.headers); len(headers) > 0 {
+	if headers := headerAttrs(r.Header, s.headers); len(headers) > 0 {
 		fields = append(fields, slog.GroupAttrs("headers", headers...))
 	}
 	s.log.Log(r.Context(), slog.LevelInfo, "request served", fields...)
@@ -235,9 +226,7 @@ func statusOf(err error) int {
 	case core.ExitOK:
 		return http.StatusOK
 	case core.ExitBackend:
-		// Only a status a client can act on is worth passing through. Anything
-		// outside the error range carries no retry semantics, and handing an
-		// out-of-range number to WriteHeader panics the handler.
+		// Handing an out-of-range number to WriteHeader panics the handler.
 		if status := core.StatusOf(err); status >= 400 && status <= 599 {
 			return status
 		}
@@ -304,8 +293,8 @@ func encodeStrings(value any) []byte {
 	return encoded
 }
 
-// clearWriteDeadline keeps a long answer from being truncated by a deadline the
-// server set for ordinary requests. Not every writer carries one.
+// A deadline set for ordinary requests would truncate a long answer. Not every
+// writer carries one.
 func clearWriteDeadline(w http.ResponseWriter) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }

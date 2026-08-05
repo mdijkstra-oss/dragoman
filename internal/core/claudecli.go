@@ -15,27 +15,21 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
-// waitDelay bounds how long Wait may spend on a child that was killed but left
-// a pipe open. It is a backstop against hanging, not a timeout on the answer:
-// the request itself may legitimately run for as long as the model takes.
-const waitDelay = 5 * time.Second
+// A backstop against a killed child holding a pipe open, not a timeout on the
+// answer — the request may legitimately run as long as the model takes.
+const killedChildPipeGrace = 5 * time.Second
 
-// ClaudeCLIExecutor reaches a locally installed Claude Code CLI. It speaks the
-// same dialect as the HTTP Anthropic endpoint — the CLI's stream carries
-// anthropic-messages events verbatim inside an envelope — so only the reaching
-// differs, never the translation.
+// The CLI's stream carries anthropic-messages events verbatim inside an
+// envelope.
 //
-// The CLI is an agent by default: it reads CLAUDE.md, runs hooks, resolves
-// skills and plugins, persists a session and executes tools. A caller who sent
-// a Responses body asked for none of that, so the flags that turn it back into
-// a model endpoint are fixed here and are not configurable.
+// It is an agent by default: it reads CLAUDE.md, runs hooks, resolves skills and
+// plugins, persists a session and executes tools. The flags that turn it back
+// into a model endpoint are fixed here.
 type ClaudeCLIExecutor struct{}
 
 func NewClaudeCLIExecutor() ClaudeCLIExecutor { return ClaudeCLIExecutor{} }
 
-// Do is unreachable while the dialect streams upstream: the CLI has no buffered
-// form, so there is no body to return. It exists so that losing that property is
-// a named failure rather than a silent empty answer.
+// The CLI has no buffered form, so there is no body to return.
 func (e ClaudeCLIExecutor) Do(_ context.Context, _ Call) (json.RawMessage, error) {
 	return nil, Fail(ExitUsage,
 		"the claude CLI answers only as a stream; this backend must be streamed upstream")
@@ -54,11 +48,8 @@ func (e ClaudeCLIExecutor) Stream(ctx context.Context, call Call, onFrame func(b
 		return err
 	}
 
-	// A reader that stops early — a frame the decoder cannot read, a stdout
-	// that will not take an event — leaves the child writing into a pipe
-	// nobody drains. It blocks on a full pipe, Wait blocks on it, and dragoman
-	// hangs instead of printing the diagnostic it was about to print. So the
-	// context has to be one this call can cancel.
+	// A reader that stops early leaves the child writing into a pipe nobody
+	// drains: it blocks on a full pipe and Wait blocks on it.
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
@@ -67,7 +58,7 @@ func (e ClaudeCLIExecutor) Stream(ctx context.Context, call Call, onFrame func(b
 	command.Stdin = bytes.NewReader(stdin)
 	// A killed child can still leave a pipe open behind it, and Wait would
 	// then wait on the pipe rather than on the process.
-	command.WaitDelay = waitDelay
+	command.WaitDelay = killedChildPipeGrace
 	diagnostics := &bytes.Buffer{}
 	command.Stderr = diagnostics
 	stdout, err := command.StdoutPipe()
@@ -82,8 +73,8 @@ func (e ClaudeCLIExecutor) Stream(ctx context.Context, call Call, onFrame func(b
 	if readErr != nil {
 		stop()
 	}
-	// Wait even when the read failed: the child still has to be reaped, and
-	// the error the reader produced is the one worth reporting.
+	// The child still has to be reaped, but the reader's error is the one worth
+	// reporting.
 	waitErr := command.Wait()
 
 	if readErr != nil {
@@ -101,20 +92,29 @@ func (e ClaudeCLIExecutor) Stream(ctx context.Context, call Call, onFrame func(b
 	return nil
 }
 
-// Preflight checks the two things that must not be discovered mid-request: that
-// the CLI is installed, and that it is signed in. Both are usage failures
-// because a binary that is absent or logged out never got asked, and exit 1 is
-// reserved for a backend that said no. Reading the status costs no tokens and
-// makes no model call.
+// A binary that is absent or logged out never got asked, so neither is a backend
+// refusal. Reading the status costs no tokens and makes no model call.
 func Preflight(ctx context.Context, binary string) error {
+	path, err := findInstalled(binary)
+	if err != nil {
+		return err
+	}
+	return checkSignedIn(ctx, path, binary)
+}
+
+func findInstalled(binary string) (string, error) {
 	path, err := exec.LookPath(binary)
 	if err != nil {
-		return Fail(ExitUsage,
+		return "", Fail(ExitUsage,
 			"claude-cli backend: %q not found on PATH; install Claude Code or pass --endpoint exec:/path/to/claude", binary)
 	}
-	// The same environment the call will run in, or preflight would describe an
-	// account other than the one that answers.
+	return path, nil
+}
+
+func checkSignedIn(ctx context.Context, path, binary string) error {
 	check := exec.CommandContext(ctx, path, "auth", "status", "--json")
+	// The same environment the call will run in, or this describes an account
+	// other than the one that answers.
 	check.Env = ChildEnv(os.Environ())
 	reported, err := check.Output()
 	if err != nil {
@@ -130,10 +130,6 @@ func Preflight(ctx context.Context, binary string) error {
 	return nil
 }
 
-// Command builds the argv and the stdin bytes for one call out of the
-// anthropic-messages body encoded for it. It performs no IO, so the whole
-// mapping from a request to an invocation is table-testable without spawning
-// anything.
 func Command(body []byte) ([]string, []byte, error) {
 	var request cliRequest
 	if err := json.Unmarshal(body, &request); err != nil {
@@ -141,10 +137,8 @@ func Command(body []byte) ([]string, []byte, error) {
 	}
 
 	argv := append([]string{}, opaqueArgs...)
-	// The system prompt is always passed, empty if the caller sent no
-	// instructions. Omitting it leaves Claude Code's own agent prompt in place,
-	// which is a body of meaning the caller never asked for; passing empty is
-	// not writing a prompt but declining to add one.
+	// Omitting this flag leaves Claude Code's own agent prompt in place, so it
+	// is always passed, empty when the caller sent no instructions.
 	argv = append(argv, "--system-prompt", request.System)
 	if request.Model != "" {
 		argv = append(argv, "--model", request.Model)
@@ -169,18 +163,12 @@ func Command(body []byte) ([]string, []byte, error) {
 	return argv, stdin, nil
 }
 
-// ChildEnv builds the environment a spawned CLI runs in. Everything is passed
-// on but the variables that decide which account answers: the CLI prefers an
-// API key in its environment over the sign-in it already performed, so a key
-// dragoman merely inherited — from a shell profile, a CI secret, a container
-// flag — would silently move the call onto a different account and bill it
-// there. Reaching a CLI that holds its own credential is the whole reason this
-// backend exists, so an inherited credential is dropped rather than forwarded.
+// The CLI prefers an API key in its environment over the sign-in it already
+// performed, so a key inherited from a shell profile, a CI secret or a container
+// flag would silently move the call onto another account and bill it there.
 //
-// This is a prefix rather than a list of names because the list is the part
-// that goes stale: a variable added by a later release would reopen exactly
-// this hole. It performs no IO, so what a child inherits is testable without
-// spawning anything.
+// Matched by prefix rather than by name because a variable added in a later
+// release would reopen the hole.
 func ChildEnv(environ []string) []string {
 	kept := make([]string, 0, len(environ))
 	for _, entry := range environ {
@@ -193,12 +181,9 @@ func ChildEnv(environ []string) []string {
 	return kept
 }
 
-// reroutes reports whether a variable decides which account answers. The
-// ANTHROPIC_ namespace goes wholesale: dragoman passes the model, the effort
-// and the schema as flags and the messages on stdin, so it needs nothing from
-// it. CLAUDE_CONFIG_DIR is deliberately not here — it says where the
-// interactive credential lives, which is the thing being preserved, and a
-// CLAUDE_ prefix scrub would break the sign-in it is meant to protect.
+// The ANTHROPIC_ namespace goes wholesale; the model, effort and schema travel
+// as flags and the messages on stdin. CLAUDE_CONFIG_DIR is excluded because it
+// says where the interactive credential lives, which is what is being preserved.
 func reroutes(name string) bool {
 	if strings.HasPrefix(name, "ANTHROPIC_") {
 		return true
@@ -206,9 +191,7 @@ func reroutes(name string) bool {
 	return name == "CLAUDE_CODE_USE_BEDROCK" || name == "CLAUDE_CODE_USE_VERTEX"
 }
 
-// BinaryOf reads the binary out of an exec endpoint. It is a name resolved on
-// PATH or an absolute path, and it is never a secret, so unlike a credential it
-// may legitimately arrive from a flag.
+// A name resolved on PATH or an absolute path, never a secret.
 func BinaryOf(endpoint string) (string, error) {
 	binary := strings.TrimPrefix(endpoint, base.SchemeExec+":")
 	if binary == endpoint || binary == "" {
@@ -218,9 +201,8 @@ func BinaryOf(endpoint string) (string, error) {
 	return binary, nil
 }
 
-// CLIOutcome is what the CLI's terminal frame reported. Failure arrives in the
-// stream rather than in an exit status, so it has to be read out of the last
-// frame rather than waited for.
+// Failure arrives in the CLI's stream rather than in an exit status, so it has
+// to be read out of the last frame rather than waited for.
 type CLIOutcome struct {
 	Seen    bool
 	Failed  bool
@@ -228,11 +210,9 @@ type CLIOutcome struct {
 	Message string
 }
 
-// ReadCLIFrames unwraps the CLI's own framing and hands the dialect events on.
-// Everything else the CLI emits — session bookkeeping, hook lifecycle, rate
-// limits — is not model output and is discarded rather than decoded. An
-// unrecognised frame is discarded too: the CLI adds frame types between
-// releases and a new one must not break a translation.
+// Session bookkeeping, hook lifecycle and rate limits are not model output. An
+// unrecognised frame is discarded too, because the CLI adds frame types between
+// releases.
 func ReadCLIFrames(reader io.Reader, onFrame func(base.Frame) error) (CLIOutcome, error) {
 	outcome := CLIOutcome{}
 	scanner := bufio.NewScanner(reader)
@@ -265,11 +245,9 @@ func ReadCLIFrames(reader io.Reader, onFrame func(base.Frame) error) (CLIOutcome
 	return outcome, nil
 }
 
-// opaqueArgs is what makes the CLI a model endpoint rather than an agent in a
-// working directory. --safe-mode is the load-bearing one: without it the
-// caller's request is answered with the local CLAUDE.md prepended to it. It is
-// preferred to --bare, which suppresses more but forces an API key and so
-// removes the only reason to reach the CLI at all.
+// Without --safe-mode the caller's request is answered with the local CLAUDE.md
+// prepended to it. --bare suppresses more but forces an API key, which removes
+// the only reason to reach the CLI.
 var opaqueArgs = []string{
 	"--print",
 	"--input-format", "stream-json",
@@ -283,10 +261,8 @@ var opaqueArgs = []string{
 	"--no-session-persistence",
 }
 
-// resultOutcome reads what the terminal frame reported. A run that failed
-// before the model answered fills in neither the status nor the result, and
-// names the kind of failure in the subtype alone — which is then the only thing
-// there is to tell the caller.
+// A run that failed before the model answered fills in neither the status nor
+// the result, and names the kind of failure in the subtype alone.
 func resultOutcome(frame cliFrame) CLIOutcome {
 	outcome := CLIOutcome{Seen: true, Failed: frame.IsError, Message: frame.Result}
 	switch {
@@ -300,11 +276,8 @@ func resultOutcome(frame cliFrame) CLIOutcome {
 	return outcome
 }
 
-// said renders everything the CLI offered about a failure: the frame's own
-// words, then the child's stderr, which is where a failure with an empty result
-// tends to have said what happened. A report that trails off after the colon
-// tells the caller only that dragoman was there, so the absence of both is
-// spelled out rather than left as punctuation.
+// A failure with an empty result tends to have said what happened on the child's
+// stderr.
 func said(message string, diagnostics *bytes.Buffer) string {
 	spoken := []string{}
 	if message = strings.TrimSpace(message); message != "" {
@@ -327,10 +300,9 @@ func detail(diagnostics *bytes.Buffer) string {
 	return ": " + text
 }
 
-// cliRequest reads back the fields of the encoded anthropic-messages body that
-// the CLI takes as flags or as stdin. Message content is kept as raw JSON so
-// that every block the dialect built — thinking with its signature, a tool call,
-// a tool result — reaches the CLI byte for byte.
+// Message content is kept as raw JSON so that every block the dialect built —
+// thinking with its signature, a tool call, a tool result — reaches the CLI byte
+// for byte.
 type cliRequest struct {
 	Model        string           `json:"model"`
 	System       string           `json:"system"`
@@ -352,8 +324,8 @@ type cliFormat struct {
 	Schema json.RawMessage `json:"schema"`
 }
 
-// cliLine is one line of the CLI's stdin. Its type repeats the message's role,
-// which is how the CLI distinguishes a turn to run from history to absorb.
+// The type repeats the message's role, which is how the CLI distinguishes a turn
+// to run from history to absorb.
 type cliLine struct {
 	Type    string     `json:"type"`
 	Message cliMessage `json:"message"`

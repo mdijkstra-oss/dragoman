@@ -44,9 +44,6 @@ func OpenPiece(key string, kind ItemType) Piece {
 	return Piece{Kind: PieceOpen, Key: key, ItemKind: kind}
 }
 
-// OpenIdentified announces an item whose id the source dialect already carries.
-// Provider state is verified against that id, so a minted one would be
-// rejected on the way back.
 func OpenIdentified(key string, kind ItemType, itemID string) Piece {
 	return Piece{Kind: PieceOpen, Key: key, ItemKind: kind, ID: itemID}
 }
@@ -63,15 +60,12 @@ func CallPiece(key, callID, name string) Piece {
 	return Piece{Kind: PieceCall, Key: key, CallID: callID, Name: name}
 }
 
-// StatePiece carries provider state for the item it arrived on.
 func StatePiece(key, state string) Piece { return Piece{Kind: PieceState, Key: key, State: state} }
 
 func ClosePiece(key string) Piece { return Piece{Kind: PieceClose, Key: key} }
 
 func UsagePiece(usage *Usage) Piece { return Piece{Kind: PieceUsage, Usage: usage} }
 
-// FailurePiece carries a provider error that arrived inside a successful HTTP
-// response. A backend that says no in the body has still said no.
 func FailurePiece(code, message string) Piece {
 	return OutcomePiece(StatusFailed, nil, &ResponseError{Code: code, Message: message})
 }

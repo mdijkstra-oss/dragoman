@@ -145,7 +145,7 @@ func serveCommand(cli ServeCmd) int {
 	if err != nil {
 		return fail(err)
 	}
-	logged, err := serve.LoggedHeaders()
+	logged, err := serve.Allowlist()
 	if err != nil {
 		return fail(err)
 	}

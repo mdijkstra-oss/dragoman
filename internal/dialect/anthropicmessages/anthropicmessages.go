@@ -52,7 +52,7 @@ func Dialect() dialect.Dialect {
 	}
 }
 
-var carries = dialect.Carries{
+var placedFields = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
 	"parallel_tool_calls", "prompt_cache_options",
@@ -63,7 +63,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	if err != nil {
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
 	}
-	drops = append(drops, dialect.Unread(req, carries)...)
+	drops = append(drops, dialect.Unread(req, placedFields)...)
 
 	if err := checkTurns(req, backend); err != nil {
 		return dialect.Encoded{}, err
@@ -109,10 +109,9 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
 }
 
-// strictness reports what became of the strict flag. This dialect carries
-// strictness per tool rather than per format, and a structured-output format
-// constrains decoding whether or not it was asked to, so asking for strict is
-// asking for what the request already gets; only asking to relax it is lost.
+// Strictness is per tool here rather than per format, and a structured-output
+// format constrains decoding whether or not it was asked to. Only asking to
+// relax it is lost.
 func strictness(strict bool) base.Drop {
 	if strict {
 		return base.Drop{Path: "text.format.strict", Reason: base.DropInert,
@@ -206,10 +205,6 @@ func userTurnStarts(items []base.Item) []int {
 	return starts
 }
 
-// turnRole reports which side of the conversation an input item joins, or the
-// empty string when it feeds the system prompt or carries nothing to send.
-// Turn membership is decided in one place so that what the encoder groups and
-// what the turn check counts can never disagree.
 func turnRole(item base.Item) string {
 	decide, moved := turnRoles[item.Type]
 	if !moved {
@@ -235,8 +230,6 @@ func messageTurn(item base.Item) string {
 	return base.RoleUser
 }
 
-// reasoningTurn joins the assistant side only when the item still carries the
-// state the backend wants back; a summary alone is not sent at all.
 func reasoningTurn(item base.Item) string {
 	if item.EncryptedContent == "" {
 		return ""
@@ -312,11 +305,9 @@ func buildMessages(req base.Request) (string, []wireMessage, []base.Drop, error)
 	return system, messages, drops, err
 }
 
-// textBlocks renders a message item's content. It is the one joined block it has
-// always been unless a part carries a cache breakpoint: cache_control sits on a
-// block, so marking the third of five parts means five blocks with the marker on
-// the third. Nothing is trimmed at four — the limit is this endpoint's to
-// enforce, and a fifth is forwarded so the refusal names it.
+// cache_control sits on a block, so marking the third of five parts means five
+// blocks with the marker on the third. Nothing is trimmed at the four-block
+// limit: a fifth is forwarded so the endpoint's refusal names it.
 func textBlocks(item base.Item, ttl *string) []wireBlock {
 	if !dialect.Marked(item.Content) {
 		return []wireBlock{{Type: "text", Text: base.GetText(item)}}
@@ -324,12 +315,8 @@ func textBlocks(item base.Item, ttl *string) []wireBlock {
 	blocks := make([]wireBlock, 0, len(item.Content))
 	for _, part := range item.Content {
 		if part.Text == "" {
-			// A part carrying no text is left out, exactly as the joined form
-			// left it out. Spelling one out would mint a block nobody sent —
-			// this endpoint refuses an empty text block, so a marker elsewhere
-			// in the message would turn a request that worked into a 400, and a
-			// marker on this part would land the caller's prefix boundary on a
-			// block dragoman invented. What could not be placed is reported.
+			// This endpoint refuses an empty text block, so a part carrying no
+			// text is left out rather than spelled into one.
 			continue
 		}
 		block := wireBlock{Type: "text", Text: part.Text}
@@ -348,10 +335,6 @@ func textBlocks(item base.Item, ttl *string) []wireBlock {
 	return blocks
 }
 
-// markerDrops reports what a cache_control could not carry from each breakpoint
-// the caller placed. The marker's presence is the whole of what travels, so the
-// bytes inside it are diffed away rather than listed by hand, and a mode arrives
-// as a path the caller can find.
 func markerDrops(items []base.Item) []base.Drop {
 	drops := []base.Drop{}
 	for index, item := range items {
@@ -391,11 +374,6 @@ func placedAny(messages []wireMessage) bool {
 	return false
 }
 
-// optionDrops reports what a cache_control could not carry from the request-wide
-// options. Only the TTL travels, and only onto a marker that was placed: a TTL
-// on a request that marked nothing is a value the caller sent and the wire never
-// saw, so claiming it as consumed would leave --strict calling that run clean.
-// Whatever else arrived is named by the diff rather than by a list kept here.
 func optionDrops(options *base.PromptCacheOptions, placed bool) []base.Drop {
 	if options == nil {
 		return nil
@@ -409,9 +387,8 @@ func optionDrops(options *base.PromptCacheOptions, placed bool) []base.Drop {
 	return dialect.ShapeDrops(options.Raw, carried, "prompt_cache_options")
 }
 
-// toolChoice maps the base's choice, and carries the parallel-call setting
-// that this dialect keeps on the same object. A request that only disables
-// parallel calls still needs a choice to hang it from.
+// This dialect keeps the parallel-call setting on the choice object, so a
+// request that only disables parallel calls still needs a choice.
 func toolChoice(req base.Request) *wireToolChoice {
 	choice := (*wireToolChoice)(nil)
 	if known := dialect.KnownChoice(req); known != nil {
@@ -439,31 +416,31 @@ type decodeState struct {
 	WrittenTokens int
 }
 
-func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.Recognised, error) {
+func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.DecodedFrame, error) {
 	current, ok := state.(decodeState)
 	if !ok {
-		return state, dialect.Recognised{}, fmt.Errorf("%s: bad decoder state", Name)
+		return state, dialect.DecodedFrame{}, fmt.Errorf("%s: bad decoder state", Name)
 	}
 	if len(frame.Data) == 0 {
-		return current, dialect.Recognised{}, nil
+		return current, dialect.DecodedFrame{}, nil
 	}
 	var event wireEvent
 	if err := json.Unmarshal(frame.Data, &event); err != nil {
-		return current, dialect.Recognised{}, fmt.Errorf("%s: event: %w", Name, err)
+		return current, dialect.DecodedFrame{}, fmt.Errorf("%s: event: %w", Name, err)
 	}
 
 	switch event.Type {
 	case "error":
 		if event.Error == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
-		return current, dialect.Recognised{
+		return current, dialect.DecodedFrame{
 			Pieces: []base.Piece{dialect.Failure(event.Error)},
 		}, nil
 
 	case "message_start":
 		if event.Message == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
 		next := current
 		if usage := event.Message.Usage; usage != nil {
@@ -471,31 +448,31 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 			next.CachedTokens = usage.CacheReadInputTokens
 			next.WrittenTokens = usage.CacheCreationInputTokens
 		}
-		return next, dialect.Recognised{
+		return next, dialect.DecodedFrame{
 			Pieces: []base.Piece{base.Start(event.Message.ID, event.Message.Model, 0)},
 		}, nil
 
 	case "content_block_start":
 		if event.ContentBlock == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
 		block := *event.ContentBlock
 		kind := kindOf(block.Type)
 		if kind == "" {
-			return current, dialect.Recognised{Drops: unmappedBlock(block.Type, event.Index)}, nil
+			return current, dialect.DecodedFrame{Drops: unmappedBlock(block.Type, event.Index)}, nil
 		}
 		pieces := []base.Piece{base.OpenPiece(dialect.Key(event.Index), kind)}
 		pieces = append(pieces, openPieces(event.Index, block)...)
-		return current, dialect.Recognised{Pieces: pieces, Drops: blockDrops(event.RawBlock, block, event.Index)}, nil
+		return current, dialect.DecodedFrame{Pieces: pieces, Drops: blockDrops(event.RawBlock, block, event.Index)}, nil
 
 	case "content_block_delta":
 		if event.Delta == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
-		return current, dialect.Recognised{Pieces: deltaPieces(event.Index, *event.Delta)}, nil
+		return current, dialect.DecodedFrame{Pieces: deltaPieces(event.Index, *event.Delta)}, nil
 
 	case "content_block_stop":
-		return current, dialect.Recognised{Pieces: []base.Piece{base.ClosePiece(dialect.Key(event.Index))}}, nil
+		return current, dialect.DecodedFrame{Pieces: []base.Piece{base.ClosePiece(dialect.Key(event.Index))}}, nil
 
 	case "message_delta":
 		pieces := []base.Piece{}
@@ -507,18 +484,18 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		if event.Delta != nil {
 			pieces = append(pieces, dialect.Outcome(event.Delta.StopReason, stopReasons))
 		}
-		return current, dialect.Recognised{Pieces: pieces}, nil
+		return current, dialect.DecodedFrame{Pieces: pieces}, nil
 	}
-	return current, dialect.Recognised{}, nil
+	return current, dialect.DecodedFrame{}, nil
 }
 
-func bodyPieces(body []byte) (dialect.Recognised, error) {
+func bodyPieces(body []byte) (dialect.DecodedFrame, error) {
 	var message wireMessageResponse
 	if err := json.Unmarshal(body, &message); err != nil {
-		return dialect.Recognised{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.DecodedFrame{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	if message.Error != nil {
-		return dialect.Recognised{Pieces: []base.Piece{
+		return dialect.DecodedFrame{Pieces: []base.Piece{
 			base.Start(message.ID, message.Model, 0),
 			dialect.Failure(message.Error),
 		}}, nil
@@ -549,10 +526,9 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 			drops = append(drops, blockDrops(raw, message.Content[index], index)...)
 		}
 	}
-	return dialect.Recognised{Pieces: pieces, Drops: drops}, nil
+	return dialect.DecodedFrame{Pieces: pieces, Drops: drops}, nil
 }
 
-// openPieces carries the identity a block announces the moment it opens.
 func openPieces(index int, block wireBlock) []base.Piece {
 	pieces := []base.Piece{}
 	if block.Type == "tool_use" {
@@ -564,8 +540,6 @@ func openPieces(index int, block wireBlock) []base.Piece {
 	return pieces
 }
 
-// contentPieces carries a whole block's content, for the buffered path where
-// nothing arrived as a delta.
 func contentPieces(index int, block wireBlock) []base.Piece {
 	switch block.Type {
 	case "text":
@@ -666,8 +640,6 @@ type wireBlock struct {
 	// Rides on every tool_use block, and is optional on the way back.
 	Caller *wireCaller `json:"caller,omitempty"`
 
-	// CacheControl is this dialect's breakpoint, placed on the block the caller
-	// marked. Never on one it did not: a breakpoint is a spending decision.
 	CacheControl *wireCacheControl `json:"cache_control,omitempty"`
 }
 
@@ -675,10 +647,8 @@ type wireCaller struct {
 	Type string `json:"type"`
 }
 
-// wireCacheControl marks a block as the end of a cacheable prefix. The TTL is
-// placed verbatim, and this endpoint takes only 5m and 1h: a 30m is forwarded so
-// the refusal names the field, because converting it would be dragoman choosing
-// a price. Absent stays absent, leaving the endpoint's own default.
+// This endpoint takes only 5m and 1h. A 30m is forwarded verbatim so the refusal
+// names the field; converting it would choose a price.
 type wireCacheControl struct {
 	Type string  `json:"type"`
 	TTL  *string `json:"ttl,omitempty"`

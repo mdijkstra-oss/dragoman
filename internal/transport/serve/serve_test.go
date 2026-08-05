@@ -757,7 +757,7 @@ func TestAnUnrecordableAllowlistIsRefusedAtLoad(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Setenv(serve.LogHeaderVar, testCase.allow)
-			names, err := serve.LoggedHeaders()
+			names, err := serve.Allowlist()
 			if !testCase.refused {
 				if err != nil {
 					t.Fatalf("%s=%q: %v", serve.LogHeaderVar, testCase.allow, err)
@@ -1099,7 +1099,7 @@ func allowlist(t *testing.T, value string, configured bool) []string {
 	} else {
 		t.Setenv(serve.LogHeaderVar, value)
 	}
-	names, err := serve.LoggedHeaders()
+	names, err := serve.Allowlist()
 	if err != nil {
 		t.Fatalf("%s=%q: %v", serve.LogHeaderVar, value, err)
 	}

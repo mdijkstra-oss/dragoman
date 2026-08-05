@@ -17,13 +17,9 @@ type Dialect struct {
 
 	Encode func(req base.Request, backend base.Backend, stream bool) (Encoded, error)
 
-	// StreamPieces recognises what happened in one wire frame.
-	StreamPieces func(state State, frame base.Frame) (State, Recognised, error)
+	StreamPieces func(state State, frame base.Frame) (State, DecodedFrame, error)
 
-	// BodyPieces recognises the same things in a whole buffered body. The
-	// per-dialect difference between the two paths is only how pieces are
-	// extracted; every translation decision lives in one place.
-	BodyPieces func(body []byte) (Recognised, error)
+	BodyPieces func(body []byte) (DecodedFrame, error)
 
 	NewState func() State
 
@@ -39,11 +35,7 @@ type Encoded struct {
 	Drops []base.Drop
 }
 
-// Recognised is what a decoder made of one frame or one body: the pieces it
-// understood, and the fields it did not. Each dialect computes its own drops
-// with base.Diff against the typed value that consumed the bytes, so the list
-// stays computed rather than hand-maintained.
-type Recognised struct {
+type DecodedFrame struct {
 	Pieces []base.Piece
 	Drops  []base.Drop
 }

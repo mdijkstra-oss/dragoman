@@ -49,18 +49,10 @@ func AsFormattedText(resp Response, req Request) Response {
 	return converted
 }
 
-// findFormatAnswer reports which item carries the answer to the caller's format.
-//
-// It is the last tool call rather than the first, and rather than all of them. The
-// claude CLI checks its own structured answer against the schema and resamples one
-// that fails, leaving every attempt in the stream — a rejected draft arrives as a
-// tool call carrying unsubstituted $PARAMETER_NAME placeholders, followed by the
-// one that survived. Converting them all would concatenate a draft and an answer
-// into two JSON values in one output text, which parses as neither.
-//
-// The drafts are left as tool calls rather than dropped: they carry no output text,
-// so nothing reading the reply sees them, and discarding what a backend sent is not
-// this function's business.
+// The last tool call rather than the first. The claude CLI checks its own
+// structured answer against the schema and resamples one that fails, leaving
+// every attempt in the stream — a rejected draft arrives carrying unsubstituted
+// $PARAMETER_NAME placeholders, followed by the one that survived.
 func findFormatAnswer(resp Response, req Request) (int, bool) {
 	format := GetFormat(req)
 	if format == nil || format.Type != "json_schema" || len(req.Tools) > 0 {

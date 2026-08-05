@@ -28,21 +28,19 @@ const (
 // This dialect's name for what the base calls input_text.
 const partText = "text"
 
-// variant is the whole of what the two formats disagree about. Everything else
-// — the encoder, both decoders, the drop table — is shared, because copying
-// them to change a field name is the N×M mistake this design exists to avoid.
-type variant struct {
+// The whole of what the two formats disagree about.
+type wireQuirks struct {
 	name        string
 	capField    string
 	streamUsage bool
 }
 
 func Dialect() dialect.Dialect {
-	return build(variant{name: Name, capField: "max_tokens"})
+	return build(wireQuirks{name: Name, capField: "max_tokens"})
 }
 
 func ChatDialect() dialect.Dialect {
-	return build(variant{
+	return build(wireQuirks{
 		name:     ChatName,
 		capField: "max_completion_tokens",
 		// OpenAI reports streamed usage only when asked; everyone else serving
@@ -51,7 +49,7 @@ func ChatDialect() dialect.Dialect {
 	})
 }
 
-func build(spoken variant) dialect.Dialect {
+func build(spoken wireQuirks) dialect.Dialect {
 	return dialect.Dialect{
 		Name:   spoken.name,
 		Path:   "/chat/completions",
@@ -72,18 +70,18 @@ func build(spoken variant) dialect.Dialect {
 	}
 }
 
-var carries = dialect.Carries{
+var placedFields = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
 	"parallel_tool_calls", "prompt_cache_key", "prompt_cache_options",
 }
 
-func encode(spoken variant, req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
+func encode(spoken wireQuirks, req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
 	drops, err := base.Unmodelled(req.Raw, req)
 	if err != nil {
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", spoken.name, err)
 	}
-	drops = append(drops, dialect.Unread(req, carries)...)
+	drops = append(drops, dialect.Unread(req, placedFields)...)
 
 	messages, itemDrops, err := buildMessages(req)
 	if err != nil {
@@ -108,10 +106,9 @@ func encode(spoken variant, req base.Request, backend base.Backend, stream bool)
 	if req.ParallelToolCalls != nil {
 		body["parallel_tool_calls"] = *req.ParallelToolCalls
 	}
-	// Both caching fields are top-level and spelled the same at both ends, so
-	// they are placed rather than mapped. Whether the model behind this endpoint
-	// supports them is the provider's to answer: a 400 naming the field is a
-	// diagnosis, where a silent strip is a 200 at full price forever.
+	// Whether the model behind this endpoint supports caching is the provider's
+	// to answer: a 400 naming the field is a diagnosis, a silent strip is a 200
+	// at full price forever.
 	if key := req.PromptCacheKey; len(key) > 0 {
 		body["prompt_cache_key"] = key
 	}
@@ -227,10 +224,8 @@ func contentOf(item base.Item) *content {
 		}
 		marker := json.RawMessage(nil)
 		if part.Marks() {
-			// Only a marker that carries something travels. A null or a false
-			// would otherwise force the spelled-out form for a caller who marked
-			// nothing, which is the one shape change this feature must not make;
-			// and there is nothing in it for the endpoint to refuse.
+			// A null or a false would force the spelled-out form for a caller who
+			// marked nothing.
 			marker = part.PromptCacheBreakpoint
 		}
 		built.Parts = append(built.Parts, wirePart{
@@ -245,9 +240,7 @@ func contentOf(item base.Item) *content {
 	return built
 }
 
-// markerDrops names every breakpoint that had no text block to ride on. The
-// field is spelled the same at both ends, so a marker on a part that reaches the
-// wire needs no entry here — only one dragoman could not place does.
+// A breakpoint with no text block to ride on could not be placed.
 func markerDrops(items []base.Item) []base.Drop {
 	drops := []base.Drop{}
 	for index, item := range items {
@@ -315,29 +308,26 @@ func toolChoice(req base.Request) any {
 	return known.Mode
 }
 
-// decodeState carries what the implicit grammar forces a decoder to remember:
-// whether the response identity has been announced, and which inferred items
-// are open. Item boundaries are not announced here — a new tool call is a new
-// index appearing, and the turn is closed only by the terminal chunk.
+// The format announces no item boundaries, so open items are tracked here.
 type decodeState struct {
 	Started bool
 }
 
-func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.Recognised, error) {
+func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.DecodedFrame, error) {
 	current, ok := state.(decodeState)
 	if !ok {
-		return state, dialect.Recognised{}, fmt.Errorf("%s: bad decoder state", Name)
+		return state, dialect.DecodedFrame{}, fmt.Errorf("%s: bad decoder state", Name)
 	}
 	if len(frame.Data) == 0 || string(frame.Data) == "[DONE]" {
-		return current, dialect.Recognised{}, nil
+		return current, dialect.DecodedFrame{}, nil
 	}
 	var chunk wireChunk
 	if err := json.Unmarshal(frame.Data, &chunk); err != nil {
-		return current, dialect.Recognised{}, fmt.Errorf("%s: chunk: %w", Name, err)
+		return current, dialect.DecodedFrame{}, fmt.Errorf("%s: chunk: %w", Name, err)
 	}
 
 	if chunk.Error != nil {
-		return current, dialect.Recognised{
+		return current, dialect.DecodedFrame{
 			Pieces: []base.Piece{dialect.Failure(chunk.Error)},
 		}, nil
 	}
@@ -352,7 +342,7 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 		built = append(built, usagePiece(chunk.Usage))
 	}
 	if len(chunk.Choices) == 0 {
-		return current, dialect.Recognised{Pieces: built}, nil
+		return current, dialect.DecodedFrame{Pieces: built}, nil
 	}
 
 	choice := chunk.Choices[0]
@@ -362,16 +352,16 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 	if choice.FinishReason != nil && *choice.FinishReason != "" {
 		built = append(built, dialect.Outcome(*choice.FinishReason, finishReasons))
 	}
-	return current, dialect.Recognised{Pieces: built}, nil
+	return current, dialect.DecodedFrame{Pieces: built}, nil
 }
 
-func bodyPieces(body []byte) (dialect.Recognised, error) {
+func bodyPieces(body []byte) (dialect.DecodedFrame, error) {
 	var completion wireCompletion
 	if err := json.Unmarshal(body, &completion); err != nil {
-		return dialect.Recognised{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.DecodedFrame{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	if completion.Error != nil {
-		return dialect.Recognised{Pieces: []base.Piece{
+		return dialect.DecodedFrame{Pieces: []base.Piece{
 			base.Start(completion.ID, completion.Model, completion.Created),
 			dialect.Failure(completion.Error),
 		}}, nil
@@ -392,7 +382,7 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 	if completion.Usage != nil {
 		built = append(built, usagePiece(completion.Usage))
 	}
-	return dialect.Recognised{Pieces: built, Drops: drops}, nil
+	return dialect.DecodedFrame{Pieces: built, Drops: drops}, nil
 }
 
 // A buffered body cannot express ordering: reasoning, content and tool calls are
@@ -476,17 +466,14 @@ func text(value string) *content {
 	return &content{Parts: []wirePart{{Type: partText, Text: value}}}
 }
 
-// content is a message body, which arrives as a string, as null, or as an array
-// of parts depending on the endpoint. It holds the parts either way and renders
-// as the bare string this dialect has always sent, spelling them out only when
-// one of them carries a cache breakpoint: the marker lives on a part, and a body
-// with none has to be byte-identical to what it was before breakpoints existed.
+// A message body arrives as a string, as null, or as an array of parts depending
+// on the endpoint. A body with no breakpoint has to stay byte-identical to what
+// it was before breakpoints existed.
 type content struct {
 	Parts []wirePart
 }
 
-// text is the parts concatenated, which is the same bytes the array form
-// carries: the gap between two collapsed items rides on the part before it.
+// The gap between two collapsed items rides on the part before it.
 func (c content) text() string {
 	var joined strings.Builder
 	for _, part := range c.Parts {
@@ -495,9 +482,8 @@ func (c content) text() string {
 	return joined.String()
 }
 
-// contentText reads a message body that may be absent. A null content leaves
-// the pointer nil without ever reaching UnmarshalJSON, which is what every
-// tool call on one of these endpoints looks like.
+// Every tool call on these endpoints carries null content, which leaves the
+// pointer nil without ever reaching UnmarshalJSON.
 func contentText(body *content) string {
 	if body == nil {
 		return ""
@@ -505,8 +491,6 @@ func contentText(body *content) string {
 	return body.text()
 }
 
-// marked reports whether any part carries a breakpoint, which is the one thing
-// that forces the array form.
 func marked(parts []wirePart) bool {
 	for _, part := range parts {
 		if len(part.Breakpoint) > 0 {
@@ -541,9 +525,7 @@ func (c content) MarshalJSON() ([]byte, error) {
 	return json.Marshal(c.text())
 }
 
-// wirePart is one part of a message body. The breakpoint is the caller's bytes
-// under the caller's name — this dialect and the base spell the field the same,
-// so it is placed rather than mapped, and its mode is never inspected.
+// This dialect and the base spell the breakpoint field the same.
 type wirePart struct {
 	Type       string          `json:"type"`
 	Text       string          `json:"text"`

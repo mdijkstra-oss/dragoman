@@ -55,7 +55,7 @@ func Dialect() dialect.Dialect {
 	}
 }
 
-var carries = dialect.Carries{
+var placedFields = dialect.Carries{
 	"model", "instructions", "input", "tools", "tool_choice",
 	"text.format", "reasoning.effort", "max_output_tokens", "stream",
 }
@@ -65,7 +65,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	if err != nil {
 		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
 	}
-	drops = append(drops, dialect.Unread(req, carries)...)
+	drops = append(drops, dialect.Unread(req, placedFields)...)
 
 	steps, system, itemDrops, err := buildSteps(req)
 	if err != nil {
@@ -138,9 +138,8 @@ func strictness(strict bool) base.Drop {
 		Detail: Name + " has no strictness flag: the schema is enforced though the request asked it not to be"}
 }
 
-// buildSteps turns the base's item list into the step list. A function result
-// must name the function it answers, which the base carries only on the call,
-// so the call is looked up by its identity.
+// A function result must name the function it answers, which the base carries
+// only on the call.
 func buildSteps(req base.Request) ([]wireStep, string, []base.Drop, error) {
 	system := ""
 	if req.Instructions != nil {
@@ -179,8 +178,7 @@ func buildSteps(req base.Request) ([]wireStep, string, []base.Drop, error) {
 			if !json.Valid(arguments) {
 				return fmt.Errorf("function_call %q: arguments are not valid JSON", item.Name)
 			}
-			// Encoding parses; decoding serialises. This is the one dialect
-			// that carries a decoded object on a buffered call.
+			// The one dialect carrying a decoded object on a buffered call.
 			steps = append(steps, wireStep{
 				Type:      stepFunctionCall,
 				ID:        item.CallID,
@@ -208,9 +206,6 @@ func buildSteps(req base.Request) ([]wireStep, string, []base.Drop, error) {
 	return steps, system, drops, err
 }
 
-// markerDrops reports every cache breakpoint the caller placed. This dialect has
-// no inline field for one, and the caller is told rather than left paying full
-// price on a request they marked.
 func markerDrops(items []base.Item) []base.Drop {
 	drops := []base.Drop{}
 	for index, item := range items {
@@ -228,8 +223,6 @@ func markerDrops(items []base.Item) []base.Drop {
 	return drops
 }
 
-// callNames indexes tool-call names by call identity, because a result must
-// name the function it answers and the base carries that only on the call.
 func callNames(items []base.Item) map[string]string {
 	names := map[string]string{}
 	for _, item := range items {
@@ -287,20 +280,20 @@ type decodeState struct {
 	Started bool
 }
 
-func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.Recognised, error) {
+func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect.DecodedFrame, error) {
 	current, ok := state.(decodeState)
 	if !ok {
-		return state, dialect.Recognised{}, fmt.Errorf("%s: bad decoder state", Name)
+		return state, dialect.DecodedFrame{}, fmt.Errorf("%s: bad decoder state", Name)
 	}
 	if len(frame.Data) == 0 || string(frame.Data) == "[DONE]" {
-		return current, dialect.Recognised{}, nil
+		return current, dialect.DecodedFrame{}, nil
 	}
 	var event wireEvent
 	if err := json.Unmarshal(frame.Data, &event); err != nil {
-		return current, dialect.Recognised{}, fmt.Errorf("%s: event: %w", Name, err)
+		return current, dialect.DecodedFrame{}, fmt.Errorf("%s: event: %w", Name, err)
 	}
 	if event.Error != nil {
-		return current, dialect.Recognised{
+		return current, dialect.DecodedFrame{
 			Pieces: []base.Piece{dialect.Failure(event.Error)},
 		}, nil
 	}
@@ -312,44 +305,44 @@ func streamPieces(state dialect.State, frame base.Frame) (dialect.State, dialect
 	switch name {
 	case "interaction.created":
 		if event.Interaction == nil || current.Started {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
 		current.Started = true
-		return current, dialect.Recognised{Pieces: []base.Piece{
+		return current, dialect.DecodedFrame{Pieces: []base.Piece{
 			base.Start(event.Interaction.ID, event.Interaction.Model, createdAt(event.Interaction.Created)),
 		}}, nil
 
 	case "step.start":
 		if event.Step == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
-		return current, dialect.Recognised{Pieces: openPieces(event.Index, *event.Step)}, nil
+		return current, dialect.DecodedFrame{Pieces: openPieces(event.Index, *event.Step)}, nil
 
 	case "step.delta":
 		if event.Delta == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
-		return current, dialect.Recognised{Pieces: deltaPieces(event.Index, *event.Delta)}, nil
+		return current, dialect.DecodedFrame{Pieces: deltaPieces(event.Index, *event.Delta)}, nil
 
 	case "step.stop":
-		return current, dialect.Recognised{Pieces: []base.Piece{base.ClosePiece(dialect.Key(event.Index))}}, nil
+		return current, dialect.DecodedFrame{Pieces: []base.Piece{base.ClosePiece(dialect.Key(event.Index))}}, nil
 
 	case "interaction.completed":
 		if event.Interaction == nil {
-			return current, dialect.Recognised{}, nil
+			return current, dialect.DecodedFrame{}, nil
 		}
-		return current, dialect.Recognised{Pieces: outcomePieces(*event.Interaction)}, nil
+		return current, dialect.DecodedFrame{Pieces: outcomePieces(*event.Interaction)}, nil
 	}
-	return current, dialect.Recognised{}, nil
+	return current, dialect.DecodedFrame{}, nil
 }
 
-func bodyPieces(body []byte) (dialect.Recognised, error) {
+func bodyPieces(body []byte) (dialect.DecodedFrame, error) {
 	var interaction wireInteraction
 	if err := json.Unmarshal(body, &interaction); err != nil {
-		return dialect.Recognised{}, fmt.Errorf("%s: %w", Name, err)
+		return dialect.DecodedFrame{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	if interaction.Error != nil {
-		return dialect.Recognised{Pieces: []base.Piece{
+		return dialect.DecodedFrame{Pieces: []base.Piece{
 			base.Start(interaction.ID, interaction.Model, 0),
 			dialect.Failure(interaction.Error),
 		}}, nil
@@ -369,12 +362,11 @@ func bodyPieces(body []byte) (dialect.Recognised, error) {
 		}
 		drops = append(drops, dialect.ShapeDrops(raw, interaction.Steps[index], dialect.IndexedPath("steps", index))...)
 	}
-	return dialect.Recognised{Pieces: pieces, Drops: drops}, nil
+	return dialect.DecodedFrame{Pieces: pieces, Drops: drops}, nil
 }
 
-// openPieces carries everything a step announces the moment it opens. A call's
-// signature arrives in full here rather than as a delta when the state belongs
-// to the call itself.
+// A call's signature arrives in full rather than as a delta when the state
+// belongs to the call itself.
 func openPieces(index int, step wireStep) []base.Piece {
 	kind := kindOf(step.Type)
 	if kind == "" {

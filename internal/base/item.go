@@ -28,10 +28,6 @@ const (
 	PartSummary    = "summary_text"
 )
 
-// Item is one element of a Responses input or output list. The fields are a
-// union over the four item types; MarshalJSON emits only the ones that belong
-// to Type, so a function_call never carries a role and a reasoning item always
-// carries its summary array.
 type Item struct {
 	Type   ItemType `json:"type"`
 	ID     string   `json:"id,omitempty"`
@@ -61,19 +57,10 @@ type ContentPart struct {
 	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
 }
 
-// Marks reports whether the caller placed a breakpoint on this part. The
-// marker's wire shape is an object, so a null, a false, an empty string, an
-// empty array and an empty object all carry nothing — the same standard
-// carriesNothing applies to every other value in the drop diff, rather than a
-// narrower one that would make this field the exception. A client that
-// serialises its unset fields writes the key with null in it, and one that
-// models the flag as a boolean writes false to mean do not cache here; placing
-// a marker off either would be dragoman buying a cache write nobody asked for,
-// on the dialect with a four-block limit.
-//
-// Presence is the whole of what this answers. What is inside a marker is never
-// read, and the bytes still travel wherever the field exists, because refusing
-// a value the caller sent is the provider's job and not dragoman's.
+// A client that serialises its unset fields writes the key with null in it, and
+// one modelling the flag as a boolean writes false to mean do not cache here.
+// Anthropic caps a request at four cached blocks, so a marker placed off either
+// spelling is a cache write nobody asked for.
 func (p ContentPart) Marks() bool {
 	var marker map[string]any
 	if json.Unmarshal(p.PromptCacheBreakpoint, &marker) != nil {
@@ -244,7 +231,7 @@ func nonNilParts(parts []ContentPart) []ContentPart {
 	return parts
 }
 
-// decodeContent accepts both the shorthand string form and the parts array.
+// The wire carries content as a bare string or as a parts array.
 func decodeContent(raw json.RawMessage) ([]ContentPart, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
@@ -260,8 +247,8 @@ func decodeContent(raw json.RawMessage) ([]ContentPart, error) {
 	return parts, nil
 }
 
-// decodeOutput accepts a function_call_output whose output is a bare string or
-// a parts array, and renders both as the string the base carries.
+// A function_call_output arrives with its output as a bare string or a parts
+// array.
 func decodeOutput(raw json.RawMessage) (string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", nil

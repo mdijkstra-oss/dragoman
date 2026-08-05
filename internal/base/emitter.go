@@ -85,18 +85,14 @@ func Open(e Emitter, key string, kind ItemType) (Emitter, []Event) {
 	return OpenAs(e, key, kind, "")
 }
 
-// OpenAs starts an item and assigns it the next output index. An id supplied
-// by the source dialect is kept verbatim, because a provider verifies its own
-// state against the id it issued; only a dialect that carries no item identity
-// gets a minted one.
+// A provider verifies its own state against the id it issued, so an id the
+// source dialect supplied is kept verbatim.
 func OpenAs(e Emitter, key string, kind ItemType, itemID string) (Emitter, []Event) {
 	if _, found := findOpen(e, key); found {
 		return e, nil
 	}
-	// A dialect may deliver content before it names the response — the
-	// identity of a chat completion arrives on whichever chunk carries it. The
-	// lifecycle opens here so an item is never announced before the response
-	// it belongs to.
+	// The identity of a chat completion arrives on whichever chunk carries it,
+	// so content can precede the response being named.
 	e, opened := Begin(e)
 	if itemID == "" {
 		itemID = mintItemID(kind, e.NextIndex)

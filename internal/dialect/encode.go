@@ -35,10 +35,7 @@ func WalkItems(items []base.Item, handlers Handlers) ([]base.Drop, error) {
 	return drops, nil
 }
 
-// FunctionTools splits a tool list into the function tools every dialect
-// carries and the drops for the rest. A hosted capability named in the tool
-// list belongs to the provider; encoding it as a nameless function would take
-// the caller's real tools down with it.
+// A hosted capability named in the tool list belongs to the provider.
 func FunctionTools(tools []base.Tool) ([]base.Tool, []base.Drop) {
 	kept := make([]base.Tool, 0, len(tools))
 	drops := []base.Drop{}
@@ -56,11 +53,9 @@ func FunctionTools(tools []base.Tool) ([]base.Tool, []base.Drop) {
 	return kept, drops
 }
 
-// Unread reports the base fields the caller supplied that a dialect does not
-// carry, plus a tool choice whose shape the base does not model.
-func Unread(req base.Request, carries Carries) []base.Drop {
+func Unread(req base.Request, placed Carries) []base.Drop {
 	carried := map[string]bool{}
-	for _, field := range carries {
+	for _, field := range placed {
 		carried[field] = true
 	}
 	drops := []base.Drop{}
@@ -79,10 +74,8 @@ func Unread(req base.Request, carries Carries) []base.Drop {
 	return drops
 }
 
-// Marked reports whether any of an item's content parts carries a cache
-// breakpoint. A dialect that has to spell its parts out to place a marker asks
-// this first, because a body with no marker must stay byte-identical to the one
-// it sent before breakpoints existed.
+// A body with no marker must stay byte-identical to the one sent before
+// breakpoints existed.
 func Marked(parts []base.ContentPart) bool {
 	for _, part := range parts {
 		if part.Marks() {
@@ -92,8 +85,6 @@ func Marked(parts []base.ContentPart) bool {
 	return false
 }
 
-// MarkerPath names where in a request a breakpoint was placed. Entries carry a
-// path rather than a name, and a marker is only ever reachable at this depth.
 func MarkerPath(item, part int) string {
 	return fmt.Sprintf("input[%d].content[%d].prompt_cache_breakpoint", item, part)
 }

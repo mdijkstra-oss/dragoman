@@ -56,7 +56,6 @@ func (c ToolChoice) Known() bool {
 	return c.Mode == ToolChoiceAuto || c.Mode == ToolChoiceNone || c.Mode == ToolChoiceRequired
 }
 
-// TextConfig carries the structured-output format.
 type TextConfig struct {
 	Format    *Format `json:"format,omitempty"`
 	Verbosity *string `json:"verbosity,omitempty"`
@@ -70,18 +69,14 @@ type Format struct {
 	Strict *bool           `json:"strict,omitempty"`
 }
 
-// Reasoning carries the reasoning level. The value is opaque and passes
-// through byte for byte.
 type Reasoning struct {
 	Effort  *string `json:"effort,omitempty"`
 	Summary *string `json:"summary,omitempty"`
 }
 
-// PromptCacheOptions is the request-wide caching setting. TTL is named because
-// it is request-wide here and per breakpoint on the dialect that spells a
-// breakpoint its own way, so the one value fans out onto every marker it
-// places. The value is opaque: a 30m is forwarded, never converted, because
-// choosing which TTL a request becomes is choosing a price.
+// The TTL is request-wide in Responses and per breakpoint on anthropic-messages,
+// so one value fans out onto every marker placed there. Converting it would
+// choose a price.
 type PromptCacheOptions struct {
 	TTL *string
 	Raw json.RawMessage
@@ -110,8 +105,6 @@ func GetModel(req Request) string {
 	return *req.Model
 }
 
-// GetEffort returns the reasoning level the request carries, or the empty
-// string. The value is never normalised, case-folded, or validated.
 func GetEffort(req Request) string {
 	if req.Reasoning == nil || req.Reasoning.Effort == nil {
 		return ""
@@ -167,9 +160,7 @@ func TextItem(role, partType, text string) Item {
 	return Item{Type: ItemMessage, Role: role, Content: []ContentPart{{Type: partType, Text: text}}}
 }
 
-// IsFunctionTool reports whether a tool is the one kind every dialect carries.
-// A hosted capability named in the tool list belongs to the provider, not to
-// dragoman, and is reported rather than encoded as a nameless function.
+// A hosted capability named in the tool list belongs to the provider.
 func IsFunctionTool(tool Tool) bool { return tool.Type == "" || tool.Type == "function" }
 
 func (c ToolChoice) MarshalJSON() ([]byte, error) {
@@ -205,9 +196,6 @@ type namedChoice struct {
 	Name string `json:"name"`
 }
 
-// MarshalJSON returns the bytes that arrived, so the drop diff sees the whole
-// object consumed and a forwarding dialect sends it verbatim. A value dragoman
-// built rather than parsed carries the TTL alone.
 func (o PromptCacheOptions) MarshalJSON() ([]byte, error) {
 	if len(o.Raw) > 0 {
 		return o.Raw, nil
