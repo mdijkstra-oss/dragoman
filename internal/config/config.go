@@ -3,6 +3,7 @@ package config
 import (
 	_ "embed"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -40,13 +41,18 @@ func Parse(document []byte, protocols []string) (map[string]base.Backend, error)
 }
 
 type service struct {
-	Endpoint       string `yaml:"endpoint"`
-	Protocol       string `yaml:"protocol"`
-	Auth           string `yaml:"auth"`
-	SchemaAsPrompt bool   `yaml:"schema_as_prompt"`
+	Endpoint          string `yaml:"endpoint"`
+	Protocol          string `yaml:"protocol"`
+	Auth              string `yaml:"auth"`
+	SchemaAsPrompt    bool   `yaml:"schema_as_prompt"`
+	MaxOutputTokensAs string `yaml:"max_output_tokens_as"`
 }
 
-const schemaAsPromptProtocol = "openai-completions"
+// Both quirks belong to the one wire format several companies serve, and
+// disagree about.
+const quirkProtocol = "openai-completions"
+
+var capFields = []string{"max_completion_tokens", "max_tokens"}
 
 func resolve(name string, entry service, known map[string]bool, protocols []string) (base.Backend, error) {
 	if entry.Protocol == "" {
@@ -65,16 +71,27 @@ func resolve(name string, entry service, known map[string]bool, protocols []stri
 	if entry.Auth == "" && !base.IsSpawned(entry.Endpoint) {
 		return base.Backend{}, fmt.Errorf("config: service %q has no auth (name the environment variable holding the key)", name)
 	}
-	if entry.SchemaAsPrompt && entry.Protocol != schemaAsPromptProtocol {
+	if entry.SchemaAsPrompt && entry.Protocol != quirkProtocol {
 		return base.Backend{}, fmt.Errorf("config: service %q sets schema_as_prompt on protocol %q (only %s has a JSON mode to fall back to)",
-			name, entry.Protocol, schemaAsPromptProtocol)
+			name, entry.Protocol, quirkProtocol)
+	}
+	if entry.MaxOutputTokensAs != "" {
+		if entry.Protocol != quirkProtocol {
+			return base.Backend{}, fmt.Errorf("config: service %q sets max_output_tokens_as on protocol %q (only %s spells the cap two ways)",
+				name, entry.Protocol, quirkProtocol)
+		}
+		if !slices.Contains(capFields, entry.MaxOutputTokensAs) {
+			return base.Backend{}, fmt.Errorf("config: service %q sets max_output_tokens_as to %q (one of: %s)",
+				name, entry.MaxOutputTokensAs, strings.Join(capFields, ", "))
+		}
 	}
 	return base.Backend{
-		Name:           name,
-		Dialect:        entry.Protocol,
-		Endpoint:       entry.Endpoint,
-		KeyEnv:         entry.Auth,
-		SchemaAsPrompt: entry.SchemaAsPrompt,
+		Name:              name,
+		Dialect:           entry.Protocol,
+		Endpoint:          entry.Endpoint,
+		KeyEnv:            entry.Auth,
+		SchemaAsPrompt:    entry.SchemaAsPrompt,
+		MaxOutputTokensAs: entry.MaxOutputTokensAs,
 	}, nil
 }
 

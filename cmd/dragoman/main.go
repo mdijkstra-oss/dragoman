@@ -36,6 +36,7 @@ type TranslateCmd struct {
 	BackendProtocol string `help:"Protocol the backend speaks." name:"backend-protocol"`
 	Endpoint        string `help:"Backend base URL."`
 	Backend         string `help:"Named service from the table."`
+	AuthEnv         string `help:"Environment variable holding the backend's key, never the key itself." name:"auth-env"`
 
 	Model     string `help:"Model to request. Passed through untouched."`
 	Effort    string `help:"Reasoning level. Passed through untouched."`
@@ -267,6 +268,7 @@ func options(cli TranslateCmd) (core.Options, error) {
 		BackendProtocol: cli.BackendProtocol,
 		Endpoint:        cli.Endpoint,
 		Preset:          cli.Backend,
+		AuthEnv:         cli.AuthEnv,
 		Model:           cli.Model,
 		Effort:          cli.Effort,
 		Strict:          cli.Strict,

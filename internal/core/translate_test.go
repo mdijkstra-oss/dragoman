@@ -402,11 +402,12 @@ func TestPresetsAreExpressibleInFlags(t *testing.T) {
 	body := weatherRequest(t)
 	for _, preset := range catalog.PresetNames() {
 		backend := catalog.Presets()[preset]
-		// schema_as_prompt is a capability of an endpoint, and the only entry in
-		// the table that no flag restates. Everything else — including the output
-		// cap and the upstream streaming decision, which the protocol now owns
-		// — must be reachable from the command line unchanged.
-		if backend.SchemaAsPrompt {
+		// The two quirk keys are capabilities of an endpoint, and the only
+		// entries in the table that no flag restates. Everything else —
+		// including the credential's variable and the upstream streaming
+		// decision, which the protocol owns — must be reachable from the
+		// command line unchanged.
+		if backend.SchemaAsPrompt || backend.MaxOutputTokensAs != "" {
 			continue
 		}
 		t.Run(preset, func(t *testing.T) {
@@ -414,6 +415,7 @@ func TestPresetsAreExpressibleInFlags(t *testing.T) {
 			viaFlags, _ := translate(t, core.Options{
 				BackendProtocol: backend.Dialect,
 				Endpoint:        backend.Endpoint,
+				AuthEnv:         backend.KeyEnv,
 			}, body)
 			if !equalJSON(viaPreset, viaFlags) {
 				t.Errorf("preset and flags disagree\npreset: %v\nflags:  %v", viaPreset, viaFlags)

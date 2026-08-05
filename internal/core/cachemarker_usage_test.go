@@ -64,16 +64,16 @@ func cachedAnswers() []cachedAnswer {
 			written:  0,
 		},
 		{
-			name:     "openai-chat-completions/write",
-			dialect:  "openai-chat-completions",
+			name:     "openai-completions/write",
+			dialect:  "openai-completions",
 			buffered: completionsBody(0, cacheWritten),
 			frames:   completionsFrames(0, cacheWritten),
 			cached:   0,
 			written:  cacheWritten,
 		},
 		{
-			name:     "openai-chat-completions/read",
-			dialect:  "openai-chat-completions",
+			name:     "openai-completions/read",
+			dialect:  "openai-completions",
 			buffered: completionsBody(cacheRead, 0),
 			frames:   completionsFrames(cacheRead, 0),
 			cached:   cacheRead,
@@ -356,10 +356,11 @@ func TestCacheWriteCountIsAnthropicsFlatTotal(t *testing.T) {
 	}
 }
 
-// TestCachedUsageWhileStreamingIsAskedFor covers why the chat dialect receives a
-// usage chunk at all. OpenAI's own chat endpoint reports usage while streaming
-// only when asked; every other endpoint serving the same body shape reports it
-// unasked, so writing the field in for them would be a body they never sent.
+// TestCachedUsageWhileStreamingIsAskedFor covers why a streamed request receives
+// a usage chunk at all. OpenAI's own chat endpoint reports usage while streaming
+// only when asked, DeepSeek documents the same field, and OpenRouter treats it as
+// deprecated and reports usage regardless, so every streamed request asks and a
+// buffered one has nothing to ask for.
 func TestCachedUsageWhileStreamingIsAskedFor(t *testing.T) {
 	body := weatherRequest(t)
 	streamed, buffered := true, false
@@ -371,7 +372,9 @@ func TestCachedUsageWhileStreamingIsAskedFor(t *testing.T) {
 	}{
 		{name: "openai-chat asks", preset: "openai-chat", stream: &streamed, want: "true"},
 		{name: "openai-chat buffered needs nothing", preset: "openai-chat", stream: &buffered, want: ""},
-		{name: "deepseek reports it unasked", preset: "deepseek", stream: &streamed, want: ""},
+		{name: "deepseek asks", preset: "deepseek", stream: &streamed, want: "true"},
+		{name: "openrouter asks", preset: "openrouter", stream: &streamed, want: "true"},
+		{name: "deepseek buffered needs nothing", preset: "deepseek", stream: &buffered, want: ""},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

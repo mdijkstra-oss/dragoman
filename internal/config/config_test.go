@@ -14,7 +14,6 @@ import (
 var protocols = []string{
 	"anthropic-messages",
 	"gemini-interactions",
-	"openai-chat-completions",
 	"openai-completions",
 	"openai-responses",
 }
@@ -44,14 +43,15 @@ func TestDefaultTableIsTheShippedBackends(t *testing.T) {
 		},
 		"deepseek": {
 			Name: "deepseek", Dialect: "openai-completions",
-			Endpoint: "https://api.deepseek.com", KeyEnv: "DEEPSEEK_API_KEY", SchemaAsPrompt: true,
+			Endpoint: "https://api.deepseek.com", KeyEnv: "DEEPSEEK_API_KEY",
+			SchemaAsPrompt: true, MaxOutputTokensAs: "max_tokens",
 		},
 		"openrouter": {
 			Name: "openrouter", Dialect: "openai-completions",
 			Endpoint: "https://openrouter.ai/api/v1", KeyEnv: "OPENROUTER_API_KEY",
 		},
 		"openai-chat": {
-			Name: "openai-chat", Dialect: "openai-chat-completions",
+			Name: "openai-chat", Dialect: "openai-completions",
 			Endpoint: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY",
 		},
 		// The one service reached by spawning a binary: no key, and no limits

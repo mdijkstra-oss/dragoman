@@ -25,27 +25,22 @@ the shape in words.
 ## Dialects
 
 The application speaks `openai-responses` and receives `openai-responses` back.
-Five dialects are available as a backend:
+Four dialects are available as a backend:
 
-| value | wire |
+| value | body format |
 |---|---|
-| `openai-responses` | `POST /responses` |
-| `openai-completions` | `POST /chat/completions` — DeepSeek, OpenRouter, and every other compatible endpoint |
-| `openai-chat-completions` | `POST /chat/completions` as OpenAI's own endpoint serves it |
-| `anthropic-messages` | `POST /messages` |
-| `gemini-interactions` | `POST /interactions` |
+| `openai-responses` | the same format dragoman accepts, forwarded to a provider that serves it |
+| `openai-completions` | chat completions, as OpenAI, DeepSeek, OpenRouter and every other compatible endpoint serve it |
+| `anthropic-messages` | Anthropic's messages format |
+| `gemini-interactions` | Google's Gemini format |
 
-The operation path is what the dialect contributes; the base URL comes from the
-service. The service table spells this `protocol` and the flag is
-`--backend-protocol`; it is the same set of names.
+The service table spells this `protocol` and the flag is `--backend-protocol`;
+it is the same set of names.
 
 A dialect is a wire shape, not a vendor. `openai-completions` names a body
-format several companies serve, and `openai-chat-completions` exists because
-OpenAI's chat endpoint is not quite that format: it spells the output cap
-`max_completion_tokens` and reports usage while streaming only when asked with
-`stream_options.include_usage`, where DeepSeek and OpenRouter use `max_tokens`
-and report it unasked. Two wire shapes are two protocols; one name over both is
-what forces a config key to paper over the difference.
+format several companies serve and one no company owns, which is why it is the
+only protocol with no default credential: an endpoint reached by flags has to
+name its own with `--auth-env`.
 
 ## Services
 
@@ -62,24 +57,25 @@ openrouter:
 | key | meaning |
 |---|---|
 | `endpoint` | base URL; the operation path belongs to the protocol |
-| `protocol` | one of the five above |
+| `protocol` | one of the four above |
 | `auth` | **name of the environment variable** holding the key, never the key |
+| `max_output_tokens_as` | optional; this endpoint spells the output cap `max_tokens` |
 | `schema_as_prompt` | optional; this endpoint has a JSON mode and no schema mode |
 
-Three keys carry every service, and one endpoint sets the fourth:
+Three keys carry every service, and one endpoint sets both of the rest:
 
 > **Placement belongs to the protocol. Capability belongs to the service.**
 
-Which field the output cap lands in, whether usage must be asked for while
-streaming, whether to stream upstream at all — placement, every one, and the
-protocol owns them. `schema_as_prompt` is the one thing that fails that test:
-DeepSeek and OpenRouter both speak `openai-completions` and disagree about
-`json_schema`, so no protocol can know it.
+How usage is reported, whether to stream upstream at all, where every field
+lands — placement, and the protocol owns them, because they follow from the wire
+format. Two keys fail that test for the same reason: DeepSeek and OpenRouter
+both speak `openai-completions` and disagree with each other, about `json_schema`
+and about how the output cap is spelled. No protocol can know either.
 
-Omitting it is the default and means false, which is legal on every protocol —
-most services never name the key. Writing `true` is what carries a claim, and it
-is a claim only `openai-completions` can honour, so it fails at load anywhere
-else: exit `2`, naming the service and the protocol it named.
+Omitting both is the default, which is legal on every protocol — most services
+name neither. Writing one is what carries a claim, and it is a claim only
+`openai-completions` can honour, so it fails at load anywhere else: exit `2`,
+naming the service and the protocol it named.
 
 ```console
 $ dragoman serve --config ./bad.yaml
@@ -102,13 +98,13 @@ The shipped table:
 | service | protocol | auth |
 |---|---|---|
 | `openai` | `openai-responses` | `OPENAI_API_KEY` |
-| `openai-chat` | `openai-chat-completions` | `OPENAI_API_KEY` |
+| `openai-chat` | `openai-completions` | `OPENAI_API_KEY` |
 | `anthropic` | `anthropic-messages` | `ANTHROPIC_API_KEY` |
 | `gemini` | `gemini-interactions` | `GEMINI_API_KEY` |
 | `deepseek` | `openai-completions` | `DEEPSEEK_API_KEY` |
 | `openrouter` | `openai-completions` | `OPENROUTER_API_KEY` |
 
-`deepseek` carries `schema_as_prompt: true`; nothing else needs a fourth key. The table
+`deepseek` carries both optional keys; nothing else needs either. The table
 ships embedded in the binary, and `--config` **replaces** it wholesale — there is
 no merge and no Go map beside it, so the file in front of you is the whole
 answer to what this instance serves. The consequence to accept is that a config
@@ -136,9 +132,13 @@ dragoman --backend-protocol gemini-interactions \
          --model gemini-3.6-flash < req.json
 ```
 
-Anything the table does is expressible in flags, and a protocol supplies its own
-default variable (`GEMINI_API_KEY` here), so an endpoint nobody anticipated is a
-config edit or a command line rather than a patch.
+Most protocols supply their own default variable (`GEMINI_API_KEY` here), so an
+endpoint nobody anticipated is a config edit or a command line rather than a
+patch. `openai-completions` is the exception at both ends: no company owns it, so
+there is no variable to default to and `--auth-env` names one, and the two
+optional keys describe an endpoint rather than a wire format, so they are the one
+thing a command line cannot restate. An endpoint that needs either needs a table
+entry.
 
 Credentials come from the environment only, never from a flag and never from the
 file. argv is visible in `ps`, in shell history, and in CI logs; a key written
@@ -171,8 +171,8 @@ skills and plugins, persists a session and executes tools. None of that was
 asked for by a caller who sent a Responses body, so dragoman fixes the flags
 that turn it back into a model endpoint and does not make them configurable.
 
-**What it cannot do is dropped, loudly.** Reaching an agent harness costs three
-capabilities:
+**What it cannot do is dropped, loudly.** Reaching an agent harness costs two
+capabilities outright, and limits a third:
 
 | dropped | why |
 |---|---|
@@ -199,7 +199,6 @@ and the reasoning level somewhere different:
 |---|---|
 | `openai-responses` | `reasoning.effort` |
 | `openai-completions` | `reasoning_effort` |
-| `openai-chat-completions` | `reasoning_effort` |
 | `anthropic-messages` | `output_config.effort` |
 | `gemini-interactions` | `generation_config.thinking_level` |
 
@@ -452,6 +451,6 @@ The suite runs offline against responses recorded from four live backends in
 `testdata/fixtures/`, over a real `httptest` server for the listener. No key and
 no network are needed.
 
-`openai-chat-completions` has no recorded fixture, so it is covered by
+OpenAI's own chat endpoint has no recorded fixture, so it is covered by
 translation assertions rather than by a round trip. That is the honest extent of
 it until one is recorded.

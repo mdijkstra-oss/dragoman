@@ -57,7 +57,15 @@ func SelectBackend(catalog Catalog, opts Options) (base.Backend, error) {
 	if backend.Endpoint == "" {
 		return base.Backend{}, Fail(ExitUsage, "no endpoint for %q: pass --endpoint", backend.Dialect)
 	}
+	if opts.AuthEnv != "" {
+		backend.KeyEnv = opts.AuthEnv
+	}
 	backend.KeyEnv = keyEnvFor(backend, spoken)
+	if backend.KeyEnv == "" && !base.IsSpawned(backend.Endpoint) {
+		return base.Backend{}, Fail(ExitUsage,
+			"%s is served by several companies and has no default credential: pass --auth-env naming the variable that holds the key",
+			backend.Dialect)
+	}
 	backend = withSchemeLimits(backend)
 	if backend.Name == "" {
 		backend.Name = backend.Dialect

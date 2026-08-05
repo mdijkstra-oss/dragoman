@@ -24,6 +24,10 @@ type Backend struct {
 	// DeepSeek and OpenRouter serve the same wire format and disagree about this.
 	SchemaAsPrompt bool
 
+	// Which field carries the output cap, where an endpoint does not take the
+	// default. Empty is the default spelling.
+	MaxOutputTokensAs string
+
 	// An agent harness resolves its own tool calls and has no channel to hand
 	// one back.
 	NoTools bool

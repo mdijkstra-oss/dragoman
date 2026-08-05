@@ -16,9 +16,12 @@ import (
 
 const Name = "openai-completions"
 
-// OpenAI's own endpoint spells the output cap and streamed usage differently
-// from everyone else serving this shape.
-const ChatName = "openai-chat-completions"
+// OpenAI deprecated max_tokens and OpenRouter takes either spelling, so this is
+// the one every endpoint but DeepSeek reads.
+const DefaultCapField = "max_completion_tokens"
+
+// The other spelling, which a service names for itself.
+const LegacyCapField = "max_tokens"
 
 const (
 	reasoningKey = "reasoning"
@@ -29,46 +32,30 @@ const (
 // This dialect's name for what the base calls input_text.
 const partText = "text"
 
-// The whole of what the two formats disagree about.
-type wireQuirks struct {
-	name        string
-	capField    string
-	streamUsage bool
-}
-
+// Several companies serve this shape, so there is no credential to default to.
 func Dialect() dialect.Dialect {
-	return build(wireQuirks{name: Name, capField: "max_tokens"})
-}
-
-func ChatDialect() dialect.Dialect {
-	return build(wireQuirks{
-		name:     ChatName,
-		capField: "max_completion_tokens",
-		// OpenAI reports streamed usage only when asked; everyone else serving
-		// this shape reports it unasked.
-		streamUsage: true,
-	})
-}
-
-func build(spoken wireQuirks) dialect.Dialect {
 	return dialect.Dialect{
-		Name:   spoken.name,
-		Path:   "/chat/completions",
-		KeyEnv: "OPENAI_API_KEY",
+		Name: Name,
+		Path: "/chat/completions",
 		Headers: func(key string) map[string]string {
 			return map[string]string{
 				"Authorization": "Bearer " + key,
 				"Content-Type":  "application/json",
 			}
 		},
-		Encode: func(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
-			return encode(spoken, req, backend, stream)
-		},
+		Encode:       encode,
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
 		DropTable:    dialect.DropTable(nil),
 	}
+}
+
+func capField(backend base.Backend) string {
+	if backend.MaxOutputTokensAs != "" {
+		return backend.MaxOutputTokensAs
+	}
+	return DefaultCapField
 }
 
 var placedFields = dialect.Carries{
@@ -77,16 +64,16 @@ var placedFields = dialect.Carries{
 	"parallel_tool_calls", "prompt_cache_key", "prompt_cache_options",
 }
 
-func encode(spoken wireQuirks, req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
+func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encoded, error) {
 	drops, err := base.Unmodelled(req.Raw, req)
 	if err != nil {
-		return dialect.Encoded{}, fmt.Errorf("%s: %w", spoken.name, err)
+		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	drops = append(drops, dialect.Unread(req, placedFields)...)
 
 	messages, itemDrops, err := buildMessages(req, schemaInstruction(req, backend))
 	if err != nil {
-		return dialect.Encoded{}, fmt.Errorf("%s: %w", spoken.name, err)
+		return dialect.Encoded{}, fmt.Errorf("%s: %w", Name, err)
 	}
 	drops = append(drops, itemDrops...)
 	drops = append(drops, markerDrops(req.Input)...)
@@ -95,11 +82,14 @@ func encode(spoken wireQuirks, req base.Request, backend base.Backend, stream bo
 	if model := base.GetModel(req); model != "" {
 		body["model"] = model
 	}
-	if stream && spoken.streamUsage {
+	// OpenAI reports streamed usage only when asked. OpenRouter treats the field
+	// as deprecated and reports usage regardless, and DeepSeek documents it, so
+	// asking costs nothing where it is not needed.
+	if stream {
 		body["stream_options"] = map[string]any{"include_usage": true}
 	}
 	if cap := req.MaxOutputTokens; cap != nil {
-		body[spoken.capField] = *cap
+		body[capField(backend)] = *cap
 	}
 	if effort := base.GetEffort(req); effort != "" {
 		body["reasoning_effort"] = effort
@@ -151,7 +141,7 @@ func encode(spoken wireQuirks, req base.Request, backend base.Backend, stream bo
 
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", spoken.name, err)
+		return dialect.Encoded{}, fmt.Errorf("%s: encode: %w", Name, err)
 	}
 	return dialect.Encoded{Body: encoded, Drops: drops}, nil
 }

@@ -15,6 +15,10 @@ type Options struct {
 	Endpoint        string
 	Preset          string
 
+	// The name of the variable holding the key, for a wire format several
+	// companies serve and no default credential fits.
+	AuthEnv string
+
 	Model     string
 	Effort    string
 	MaxTokens *int

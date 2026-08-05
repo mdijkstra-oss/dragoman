@@ -37,7 +37,6 @@ func Dialects() map[string]dialect.Dialect {
 	for _, spoken := range []dialect.Dialect{
 		openairesponses.Dialect(),
 		openaicompletions.Dialect(),
-		openaicompletions.ChatDialect(),
 		anthropicmessages.Dialect(),
 		geminiinteractions.Dialect(),
 	} {
