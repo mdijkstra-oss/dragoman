@@ -425,14 +425,51 @@ func TestServicesDescribesTheTableWithoutCredentials(t *testing.T) {
 			t.Errorf("service %q is not listed", name)
 			continue
 		}
-		want := serve.Service{Name: name, Protocol: backend.Dialect, Endpoint: backend.Endpoint, Auth: backend.KeyEnv}
+		want := serve.Service{
+			Name:      name,
+			Protocol:  backend.Dialect,
+			Endpoint:  backend.Endpoint,
+			Auth:      backend.KeyEnv,
+			Available: true,
+		}
 		if row != want {
 			t.Errorf("service %q = %+v, want %+v", name, row, want)
 		}
 	}
 	for _, fields := range fieldNames(t, answered.body) {
-		if !slices.Equal(fields, []string{"auth", "endpoint", "name", "protocol"}) {
+		if !slices.Equal(fields, []string{"auth", "available", "endpoint", "name", "protocol"}) {
 			t.Errorf("a service row carries fields beyond the table: %v", fields)
+		}
+	}
+}
+
+// TestServicesReportsWhichCredentialsAreMissing covers the question a client asks
+// before it picks a model: which of these would answer right now. An unset key is
+// the one reason a listed service would not, and naming it here is what turns a
+// runtime 500 into something checkable up front.
+func TestServicesReportsWhichCredentialsAreMissing(t *testing.T) {
+	const absent = "GEMINI_API_KEY"
+
+	server := listen(t, serve.Config{Executor: fixtures("anthropic")})
+	t.Setenv(absent, "")
+	answered := send(t, server, http.MethodGet, "/services", nil)
+
+	var rows []serve.Service
+	if err := json.Unmarshal([]byte(answered.body), &rows); err != nil {
+		t.Fatalf("services is not a table: %v", err)
+	}
+
+	for name, backend := range catalog.Presets() {
+		row, listed := findService(rows, name)
+		if !listed {
+			t.Errorf("service %q is not listed", name)
+			continue
+		}
+		// A service naming no variable holds its own credential, so nothing here
+		// can make it unavailable.
+		want := backend.KeyEnv != absent
+		if row.Available != want {
+			t.Errorf("service %q available = %v, want %v", name, row.Available, want)
 		}
 	}
 }

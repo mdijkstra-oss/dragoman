@@ -31,6 +31,10 @@ type Service struct {
 	Protocol string `json:"protocol"`
 	Endpoint string `json:"endpoint"`
 	Auth     string `json:"auth"`
+	// Whether a request naming this service would reach its provider or answer
+	// that the variable in Auth is unset. Read per request, so setting a key and
+	// asking again reports the change without a restart.
+	Available bool `json:"available"`
 }
 
 // For a provider error arriving in the body with a 200 on the status line. A
@@ -250,10 +254,11 @@ func getServices(table map[string]base.Backend) []Service {
 	for _, name := range serviceNames(table) {
 		backend := table[name]
 		rows = append(rows, Service{
-			Name:     name,
-			Protocol: backend.Dialect,
-			Endpoint: backend.Endpoint,
-			Auth:     backend.KeyEnv,
+			Name:      name,
+			Protocol:  backend.Dialect,
+			Endpoint:  backend.Endpoint,
+			Auth:      backend.KeyEnv,
+			Available: hasCredential(backend),
 		})
 	}
 	return rows

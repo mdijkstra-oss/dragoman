@@ -257,7 +257,7 @@ dragoman serve --addr 127.0.0.1:8080 --config ./dragoman.yaml
 | route | purpose |
 |---|---|
 | `POST /responses` | an `openai-responses` request whose `model` names its service first: `openai/gpt-5.5` |
-| `GET /services` | the table as JSON — name, protocol, endpoint, and the variable each needs. Never a key, and never whether one is set |
+| `GET /services` | the table as JSON — name, protocol, endpoint, the variable each needs, and whether that variable is set. Never a key |
 | `GET /health` | liveness only |
 
 **The service is the first segment of `model`, split on the first `/` only.**
@@ -294,6 +294,20 @@ The exit codes below become status codes:
 | `2` | `500` | the service's `auth` variable is unset |
 | `1` | the backend's own status | the backend refused |
 | `0` | `200` | translated |
+
+A key is read when a request names its service, never at startup, so an instance
+comes up serving every row of its table whatever the environment holds. That
+keeps one absent key from taking down the services beside it, and it is why
+`GET /services` reports `available` per row:
+
+```json
+{"name": "gemini", "protocol": "gemini-interactions", "auth": "GEMINI_API_KEY", "available": false}
+```
+
+A client can pick a model it knows will answer rather than discovering the gap
+on the call. The flag says whether the named variable holds anything, not what,
+and a service naming no variable is always available because it carries its own
+credential.
 
 A missing credential is `500` and not `400`: the caller did nothing wrong, the
 instance is misconfigured, and a `4xx` there would send an SDK into a retry loop

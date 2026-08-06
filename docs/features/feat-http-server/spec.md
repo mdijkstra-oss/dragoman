@@ -166,11 +166,12 @@ Two supporting routes:
 
 | route | purpose |
 |---|---|
-| `GET /services` | the table as JSON — name, protocol, endpoint, and the variable each needs. Never a key, and never whether one is set. |
+| `GET /services` | the table as JSON — name, protocol, endpoint, the variable each needs, and whether that variable is set. Never a key. |
 | `GET /health` | liveness only |
 
 `GET /services` is what makes a running instance self-describing, so a client discovers what
-it can address without the operator's config file.
+it can address without the operator's config file. `available` extends that to what would
+answer right now: the flag says whether the named variable holds anything, never what.
 
 **No client authentication.** The listener accepts any incoming request and binds
 `127.0.0.1` by default. A shared bearer token would be authentication theatre in front of a
@@ -285,8 +286,8 @@ and no network. Table-driven, and the cases that matter are the ones the design 
   event
 - the status mapping above, each row
 - a config replaces the table rather than merging: a file naming one service serves one
-- a service whose `auth` variable is unset starts, serves `/services`, and fails `500` only
-  when called
+- a service whose `auth` variable is unset starts, is listed by `/services` as
+  `available: false`, and fails `500` only when called
 - an unknown `protocol` fails at load
 - the embedded default table produces, service for service, the same backends the current
   preset map produces — modulo the two named behaviour changes. The migration is otherwise
