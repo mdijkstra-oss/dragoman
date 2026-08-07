@@ -29,9 +29,8 @@ const (
 
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
-		Name:   Name,
-		Path:   "/interactions",
-		KeyEnv: "GEMINI_API_KEY",
+		Name: Name,
+		Path: "/interactions",
 		Headers: func(key string) map[string]string {
 			return map[string]string{
 				"x-goog-api-key": key,

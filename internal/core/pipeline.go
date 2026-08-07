@@ -50,21 +50,29 @@ func SelectBackend(catalog Catalog, opts Options) (base.Backend, error) {
 	if backend.Dialect == "" {
 		return base.Backend{}, Fail(ExitUsage, "no backend: pass --backend or --backend-protocol")
 	}
-	spoken, known := catalog.Dialects[backend.Dialect]
-	if !known {
+	if _, known := catalog.Dialects[backend.Dialect]; !known {
 		return base.Backend{}, Fail(ExitUsage, "unknown backend protocol %q", backend.Dialect)
 	}
 	if backend.Endpoint == "" {
 		return base.Backend{}, Fail(ExitUsage, "no endpoint for %q: pass --endpoint", backend.Dialect)
 	}
+	// A key belongs to the host it was issued for. Left to be inherited, an
+	// endpoint named on the command line would be handed whichever key the
+	// preset or the protocol happened to supply.
+	if opts.Endpoint != "" && opts.AuthEnv == "" && !base.IsSpawned(opts.Endpoint) {
+		return base.Backend{}, Fail(ExitUsage,
+			"--endpoint %s needs --auth-env naming the variable that holds that endpoint's key", opts.Endpoint)
+	}
 	if opts.AuthEnv != "" {
 		backend.KeyEnv = opts.AuthEnv
 	}
-	backend.KeyEnv = keyEnvFor(backend, spoken)
-	if backend.KeyEnv == "" && !base.IsSpawned(backend.Endpoint) {
+	// A locally installed CLI was signed in once, interactively, and there is no
+	// key to find.
+	if base.IsSpawned(backend.Endpoint) {
+		backend.KeyEnv = ""
+	} else if backend.KeyEnv == "" {
 		return base.Backend{}, Fail(ExitUsage,
-			"%s is served by several companies and has no default credential: pass --auth-env naming the variable that holds the key",
-			backend.Dialect)
+			"no credential for %q: pass --auth-env naming the variable that holds the key", backend.Endpoint)
 	}
 	backend = withSchemeLimits(backend)
 	if backend.Name == "" {
@@ -84,18 +92,6 @@ func withSchemeLimits(backend base.Backend) base.Backend {
 	reached.NoOutputCap = true
 	reached.OneTurnPerRequest = true
 	return reached
-}
-
-// A locally installed CLI was signed in once, interactively, and there is no key
-// to find.
-func keyEnvFor(backend base.Backend, spoken dialect.Dialect) string {
-	if base.IsSpawned(backend.Endpoint) {
-		return ""
-	}
-	if backend.KeyEnv != "" {
-		return backend.KeyEnv
-	}
-	return spoken.KeyEnv
 }
 
 func Translate(catalog Catalog, opts Options, body []byte) (base.Request, base.Backend, dialect.Dialect, dialect.Encoded, error) {

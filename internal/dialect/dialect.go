@@ -13,8 +13,6 @@ type Dialect struct {
 
 	Headers func(key string) map[string]string
 
-	KeyEnv string
-
 	Encode func(req base.Request, backend base.Backend, stream bool) (Encoded, error)
 
 	StreamPieces func(state State, frame base.Frame) (State, DecodedFrame, error)

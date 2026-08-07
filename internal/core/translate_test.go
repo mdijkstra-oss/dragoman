@@ -434,6 +434,7 @@ func TestRequiredCapTravelsWithTheProtocol(t *testing.T) {
 	sent, _ := translate(t, core.Options{
 		BackendProtocol: "anthropic-messages",
 		Endpoint:        "https://api.anthropic.com/v1",
+		AuthEnv:         "ANTHROPIC_API_KEY",
 	}, body)
 	if got := lookup(sent, "max_tokens"); got != "20000" {
 		t.Errorf("max_tokens = %q, want %q from the protocol itself", got, "20000")

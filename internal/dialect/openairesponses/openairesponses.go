@@ -15,9 +15,8 @@ const Name = "openai-responses"
 
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
-		Name:   Name,
-		Path:   "/responses",
-		KeyEnv: "OPENAI_API_KEY",
+		Name: Name,
+		Path: "/responses",
 		Headers: func(key string) map[string]string {
 			return map[string]string{
 				"Authorization": "Bearer " + key,

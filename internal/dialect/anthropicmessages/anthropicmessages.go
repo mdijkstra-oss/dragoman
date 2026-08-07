@@ -24,9 +24,8 @@ const DefaultMaxTokens = 20000
 
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
-		Name:   Name,
-		Path:   "/messages",
-		KeyEnv: "ANTHROPIC_API_KEY",
+		Name: Name,
+		Path: "/messages",
 		// This endpoint's own SDKs require streaming at a cap this size, to
 		// avoid HTTP timeouts.
 		StreamUpstream: true,
