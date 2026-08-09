@@ -6,7 +6,6 @@ package anthropicmessages
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/mdijkstra-oss/dragoman/internal/base"
 	"github.com/mdijkstra-oss/dragoman/internal/dialect"
@@ -64,10 +63,6 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	}
 	drops = append(drops, dialect.Unread(req, placedFields)...)
 
-	if err := checkTurns(req, backend); err != nil {
-		return dialect.Encoded{}, err
-	}
-
 	cap, capDrops := outputCap(req, backend)
 	drops = append(drops, capDrops...)
 
@@ -82,7 +77,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	drops = append(drops, markerDrops(req.Input)...)
 	drops = append(drops, optionDrops(req.PromptCacheOptions, placedAny(body.Messages))...)
 
-	drops = append(drops, applyTools(&body, req, backend)...)
+	drops = append(drops, applyTools(&body, req)...)
 
 	if effort := base.GetEffort(req); effort != "" {
 		body.OutputConfig = &wireOutputConfig{Effort: effort}
@@ -120,15 +115,8 @@ func strictness(strict bool) base.Drop {
 		Detail: Name + " carries strictness per tool: the format is enforced though the request asked it not to be"}
 }
 
-// This wire format will not accept a request without an output cap. The
-// exception is the endpoint with nowhere to put one.
+// This wire format will not accept a request without an output cap.
 func outputCap(req base.Request, backend base.Backend) (*int, []base.Drop) {
-	if backend.NoOutputCap {
-		if req.MaxOutputTokens == nil {
-			return nil, nil
-		}
-		return nil, []base.Drop{cannot(backend, "max_output_tokens", "has no output cap")}
-	}
 	cap := DefaultMaxTokens
 	if req.MaxOutputTokens != nil {
 		cap = *req.MaxOutputTokens
@@ -136,12 +124,7 @@ func outputCap(req base.Request, backend base.Backend) (*int, []base.Drop) {
 	return &cap, nil
 }
 
-// A backend that resolves tool calls itself has no channel to hand one back, so
-// a tool sent there produces prose where the caller expected a call.
-func applyTools(body *wireRequest, req base.Request, backend base.Backend) []base.Drop {
-	if backend.NoTools {
-		return toolless(req, backend)
-	}
+func applyTools(body *wireRequest, req base.Request) []base.Drop {
 	tools, drops := dialect.FunctionTools(req.Tools)
 	for _, tool := range tools {
 		body.Tools = append(body.Tools, wireTool{
@@ -155,53 +138,11 @@ func applyTools(body *wireRequest, req base.Request, backend base.Backend) []bas
 	return drops
 }
 
-func toolless(req base.Request, backend base.Backend) []base.Drop {
-	drops := []base.Drop{}
-	for index := range req.Tools {
-		drops = append(drops, cannot(backend,
-			dialect.IndexedPath("tools", index), "resolves its own tools and cannot return a call to the caller"))
-	}
-	if req.ToolChoice != nil {
-		drops = append(drops, cannot(backend, "tool_choice", "has no tools to choose between"))
-	}
-	if req.ParallelToolCalls != nil {
-		drops = append(drops, cannot(backend, "parallel_tool_calls", "has no tools to run in parallel"))
-	}
-	return drops
-}
-
-// A one-turn backend runs a turn per user message. Dropping one changes the
-// conversation and sending one runs an extra turn nobody asked for.
-func checkTurns(req base.Request, backend base.Backend) error {
-	if !backend.OneTurnPerRequest {
-		return nil
-	}
-	starts := userTurnStarts(req.Input)
-	if len(starts) <= 1 {
-		return nil
-	}
-	paths := make([]string, 0, len(starts))
-	for _, index := range starts {
-		paths = append(paths, dialect.IndexedPath("input", index))
-	}
-	return fmt.Errorf("%s executes one turn per request; input has %d user turns, at %s",
-		backend.Name, len(starts), strings.Join(paths, ", "))
-}
-
-func userTurnStarts(items []base.Item) []int {
-	starts := []int{}
-	previous := ""
-	for index, item := range items {
-		role := turnRole(item)
-		if role == "" {
-			continue
-		}
-		if role == base.RoleUser && previous != base.RoleUser {
-			starts = append(starts, index)
-		}
-		previous = role
-	}
-	return starts
+var turnRoles = map[base.ItemType]func(base.Item) string{
+	base.ItemMessage:            messageTurn,
+	base.ItemReasoning:          reasoningTurn,
+	base.ItemFunctionCall:       assistantTurn,
+	base.ItemFunctionCallOutput: userTurn,
 }
 
 func turnRole(item base.Item) string {
@@ -210,13 +151,6 @@ func turnRole(item base.Item) string {
 		return ""
 	}
 	return decide(item)
-}
-
-var turnRoles = map[base.ItemType]func(base.Item) string{
-	base.ItemMessage:            messageTurn,
-	base.ItemReasoning:          reasoningTurn,
-	base.ItemFunctionCall:       assistantTurn,
-	base.ItemFunctionCallOutput: userTurn,
 }
 
 func messageTurn(item base.Item) string {

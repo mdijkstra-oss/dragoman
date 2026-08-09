@@ -13,8 +13,7 @@ import (
 
 // The five presets are the five wire formats, one each: openai is
 // openai-responses, openai-chat is openai-chat-completions, deepseek is
-// openai-completions, and the other two name themselves. claude-cli is not a
-// sixth — it speaks anthropic-messages.
+// openai-completions, and the other two name themselves.
 var cacheDropDialects = []string{"anthropic", "deepseek", "gemini", "openai", "openai-chat"}
 
 // cacheDropBody is one user turn of two parts with the marker on the second,

@@ -20,9 +20,8 @@ func New() core.Catalog {
 func Executors() core.Executors {
 	overHTTP := core.NewHTTPExecutor()
 	return core.Executors{
-		"http":          overHTTP,
-		"https":         overHTTP,
-		base.SchemeExec: core.NewClaudeCLIExecutor(),
+		"http":  overHTTP,
+		"https": overHTTP,
 	}
 }
 

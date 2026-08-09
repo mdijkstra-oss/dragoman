@@ -65,10 +65,9 @@ func resolve(name string, entry service, known map[string]bool, protocols []stri
 	if entry.Endpoint == "" {
 		return base.Backend{}, fmt.Errorf("config: service %q has no endpoint", name)
 	}
-	// A CLI signed in interactively holds its own credential and names no
-	// variable. Elsewhere the variable is required and its value is not: an
-	// unset key fails when that service is called.
-	if entry.Auth == "" && !base.IsSpawned(entry.Endpoint) {
+	// The variable is required and its value is not: an unset key fails when
+	// that service is called.
+	if entry.Auth == "" {
 		return base.Backend{}, fmt.Errorf("config: service %q has no auth (name the environment variable holding the key)", name)
 	}
 	if entry.SchemaAsPrompt && entry.Protocol != quirkProtocol {

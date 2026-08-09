@@ -54,13 +54,6 @@ func TestDefaultTableIsTheShippedBackends(t *testing.T) {
 			Name: "openai-chat", Dialect: "openai-completions",
 			Endpoint: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY",
 		},
-		// The one service reached by spawning a binary: no key, and no limits
-		// stated here, because those follow from the scheme rather than the
-		// table.
-		"claude-cli": {
-			Name: "claude-cli", Dialect: "anthropic-messages",
-			Endpoint: "exec:claude",
-		},
 	}
 
 	if len(table) != len(want) {
@@ -157,21 +150,20 @@ func TestLoadFailuresNameWhatIsWrong(t *testing.T) {
 	}
 }
 
-// TestSpawnedServiceNeedsNoAuth covers the one exemption from the required
-// variable. A service dragoman reaches by spawning was signed in once,
-// interactively, and there is no variable to name — demanding one would put a
-// key back in front of the only backend that does not need it.
-func TestSpawnedServiceNeedsNoAuth(t *testing.T) {
-	table, err := config.Parse([]byte(`
+// TestServiceWithoutAuthIsRefused covers the rule that every service names the
+// variable holding its key: a service that names none could only fail at the
+// call, with no way to tell a missing key from a wrong one.
+func TestServiceWithoutAuthIsRefused(t *testing.T) {
+	_, err := config.Parse([]byte(`
 local:
-  endpoint: exec:claude
+  endpoint: https://e
   protocol: anthropic-messages
 `), protocols)
-	if err != nil {
-		t.Fatalf("a self-authenticating service refused to load: %v", err)
+	if err == nil {
+		t.Fatal("a service naming no variable loaded")
 	}
-	if table["local"].KeyEnv != "" {
-		t.Errorf("auth = %q, want none", table["local"].KeyEnv)
+	if !strings.Contains(err.Error(), "has no auth") {
+		t.Errorf("error does not name the missing auth: %v", err)
 	}
 }
 

@@ -29,7 +29,6 @@ A service is a name for a provider. dragoman ships with seven, embedded in the b
 | `gemini` | `GEMINI_API_KEY` | `https://generativelanguage.googleapis.com/v1beta` | `gemini-interactions` |
 | `deepseek` | `DEEPSEEK_API_KEY` | `https://api.deepseek.com` | `openai-completions` |
 | `openrouter` | `OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1` | `openai-completions` |
-| [`claude-cli`](#the-local-cli) | none | `exec:claude` | `anthropic-messages` |
 
 Export the variable, name the service with `--backend` on the pipe or as the first segment of `model` on the listener, and there is nothing else to set up. The variable is read when a request names the service, never at startup, so an instance serves every row whatever the environment holds.
 
@@ -69,31 +68,6 @@ A config file **replaces** the embedded table wholesale; there is no merge, so a
 > A schema in a prompt is a request, not a constraint. `strict` is dropped along with the field that carried it, and the drop is recorded on every such request.
 
 Neither optional key has a flag. An endpoint that needs one needs a table entry.
-
-## The local CLI
-
-One service is a process rather than a URL. `claude-cli` spawns a locally installed Claude Code, which authenticates itself, so a developer with a subscription and no API key can route a request through it:
-
-```sh
-dragoman --backend claude-cli --model sonnet < request.json
-```
-
-It is a row of the same table as every other service, so the listener serves it too — a request naming `claude-cli/sonnet` as its model reaches the same backend the pipe does, and `GET /services` reports it with an empty `auth`.
-
-`--backend claude-cli` is sugar for `--backend-protocol anthropic-messages --endpoint exec:claude`, and the `exec:` scheme is what selects a process. The scheme also carries what such a backend cannot do, so naming the binary in flags behaves exactly as the table entry does.
-
-The CLI is an agent by default — it reads `CLAUDE.md`, runs hooks, resolves skills and plugins, persists a session and executes tools. None of that was asked for by a caller who sent a Responses body, so dragoman fixes the flags that turn it back into a model endpoint and does not make them configurable.
-
-Reaching an agent harness costs two capabilities, and both are dropped loudly rather than ignored:
-
-| dropped | why |
-|---|---|
-| `tools[n]`, `tool_choice`, `parallel_tool_calls` | the CLI resolves its own tools and has no channel to hand a call back |
-| `max_output_tokens` | it has no flag for an output cap |
-
-A second **user** message is a refusal rather than a drop: exit `2`, naming every user turn in the input. The CLI runs a turn per user message, so sending one would run an extra turn whose answer nobody asked for, and dropping one would change the conversation. A tool result counts as a user turn. A one-shot client works against this service; a chat client does not.
-
-Two preflight checks run before the call, both exit `2`: the binary is on `PATH`, and `claude auth status` reports a signed-in session. Neither costs a token.
 
 ## Model, effort and output cap
 
@@ -185,12 +159,12 @@ Because a key is read per request rather than at startup, one absent key never t
 
 ```json
 [
-  {"name":"claude-cli","protocol":"anthropic-messages","endpoint":"exec:claude","auth":"","available":true},
+  {"name":"openai","protocol":"openai-responses","endpoint":"https://api.openai.com/v1","auth":"OPENAI_API_KEY","available":true},
   {"name":"gemini","protocol":"gemini-interactions","endpoint":"https://generativelanguage.googleapis.com/v1beta","auth":"GEMINI_API_KEY","available":false}
 ]
 ```
 
-A client can pick a model it knows will answer rather than discovering the gap on the call. The flag says whether the named variable holds anything, not what, and a service naming no variable is always available because it carries its own credential.
+A client can pick a model it knows will answer rather than discovering the gap on the call. The flag says whether the named variable holds anything, not what.
 
 A missing credential is `500` and not `400`: the caller did nothing wrong, the instance is misconfigured, and a `4xx` there would send an SDK into a retry loop over an operator error. A refusal keeps the backend's own status, because a rate limit carries retry semantics the SDK already implements; a provider error that arrived on a `200` becomes `502`. Failures are `openai-responses` error objects — a client that knows only this format has to be able to read them too. Once the first event of a stream is written the status line is already sent, so a mid-stream failure ends the stream as an event.
 
@@ -245,7 +219,7 @@ Dependencies flow one way. The base imports nothing; protocol packages import th
 | `internal/dialect/` | the shape every wire format implements |
 | `internal/dialect/*/` | one package per protocol |
 | `internal/config/` | the service table — YAML in, backends out, and the embedded default |
-| `internal/core/` | flag precedence, backend selection, the pipeline, and the executors that reach a backend over HTTP or by spawning a local CLI |
+| `internal/core/` | flag precedence, backend selection, the pipeline, and the executor that reaches a backend over HTTP |
 | `internal/catalog/` | the registered protocols, and the table built out of them |
 | `internal/transport/pipe/` | stdin to stdout |
 | `internal/transport/serve/` | HTTP in, one body or an SSE stream out |

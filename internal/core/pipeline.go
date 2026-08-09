@@ -59,39 +59,21 @@ func SelectBackend(catalog Catalog, opts Options) (base.Backend, error) {
 	// A key belongs to the host it was issued for. Left to be inherited, an
 	// endpoint named on the command line would be handed whichever key the
 	// preset or the protocol happened to supply.
-	if opts.Endpoint != "" && opts.AuthEnv == "" && !base.IsSpawned(opts.Endpoint) {
+	if opts.Endpoint != "" && opts.AuthEnv == "" {
 		return base.Backend{}, Fail(ExitUsage,
 			"--endpoint %s needs --auth-env naming the variable that holds that endpoint's key", opts.Endpoint)
 	}
 	if opts.AuthEnv != "" {
 		backend.KeyEnv = opts.AuthEnv
 	}
-	// A locally installed CLI was signed in once, interactively, and there is no
-	// key to find.
-	if base.IsSpawned(backend.Endpoint) {
-		backend.KeyEnv = ""
-	} else if backend.KeyEnv == "" {
+	if backend.KeyEnv == "" {
 		return base.Backend{}, Fail(ExitUsage,
 			"no credential for %q: pass --auth-env naming the variable that holds the key", backend.Endpoint)
 	}
-	backend = withSchemeLimits(backend)
 	if backend.Name == "" {
 		backend.Name = backend.Dialect
 	}
 	return backend, nil
-}
-
-// A locally installed agent CLI resolves its own tools, takes no output cap and
-// runs a turn per user message.
-func withSchemeLimits(backend base.Backend) base.Backend {
-	if !base.IsSpawned(backend.Endpoint) {
-		return backend
-	}
-	reached := backend
-	reached.NoTools = true
-	reached.NoOutputCap = true
-	reached.OneTurnPerRequest = true
-	return reached
 }
 
 func Translate(catalog Catalog, opts Options, body []byte) (base.Request, base.Backend, dialect.Dialect, dialect.Encoded, error) {
@@ -198,9 +180,6 @@ func resolveExecutor(catalog Catalog, backend base.Backend, supplied Executor) (
 }
 
 func targetOf(spoken dialect.Dialect, backend base.Backend) string {
-	if base.IsSpawned(backend.Endpoint) {
-		return backend.Endpoint
-	}
 	return dialect.Endpoint(spoken, backend)
 }
 
