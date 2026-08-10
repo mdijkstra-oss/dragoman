@@ -7,31 +7,11 @@ import (
 	"strings"
 )
 
-type DropReason string
-
-const (
-	DropUnsupported   DropReason = "unsupported"
-	DropUnimplemented DropReason = "unimplemented"
-	DropInert         DropReason = "inert"
-)
-
+// A detail is what the dialect has to say about the loss. The field diff finds
+// the rest, and has nothing to say about a field nothing read.
 type Drop struct {
-	Path   string     `json:"path"`
-	Reason DropReason `json:"reason"`
-	Detail string     `json:"detail,omitempty"`
-}
-
-func (d Drop) Notable() bool { return d.Reason != DropInert }
-
-func PartitionDrops(drops []Drop) (notable, inert []Drop) {
-	for _, drop := range drops {
-		if drop.Notable() {
-			notable = append(notable, drop)
-			continue
-		}
-		inert = append(inert, drop)
-	}
-	return notable, inert
+	Path   string `json:"path"`
+	Detail string `json:"detail,omitempty"`
 }
 
 func Diff(raw json.RawMessage, typed any) ([]Drop, error) {
@@ -55,34 +35,10 @@ func Diff(raw json.RawMessage, typed any) ([]Drop, error) {
 	return drops, nil
 }
 
-func Classify(drops []Drop, table map[string]DropReason) []Drop {
-	classified := make([]Drop, 0, len(drops))
-	for _, drop := range drops {
-		if drop.Reason == "" {
-			drop.Reason = DropUnimplemented
-			if reason, named := table[LeafName(drop.Path)]; named {
-				drop.Reason = reason
-			}
-		}
-		classified = append(classified, drop)
-	}
-	return classified
-}
-
-func LeafName(path string) string {
-	if index := strings.LastIndex(path, "."); index >= 0 {
-		path = path[index+1:]
-	}
-	if index := strings.Index(path, "["); index >= 0 {
-		path = path[:index]
-	}
-	return path
-}
-
 func FormatDrops(drops []Drop) string {
 	lines := make([]string, 0, len(drops))
 	for _, drop := range drops {
-		line := fmt.Sprintf("dropped (%s): %s", drop.Reason, drop.Path)
+		line := "dropped: " + drop.Path
 		if drop.Detail != "" {
 			line += " — " + drop.Detail
 		}

@@ -464,60 +464,39 @@ func TestHealthIsLiveness(t *testing.T) {
 }
 
 // TestDropsGoToTheLogAndNotTheBody keeps the answer a client can parse while
-// the drop stays loud for the operator. On the pipe the caller reads stderr;
-// over HTTP there is nobody to read it but the log.
+// the drop stays reachable for the operator. Over HTTP there is nobody to read
+// stderr, so the log is the only route, and a drop recurs on every request of a
+// kind — an operator who learns to skim those skims the one that mattered with
+// them. Only a logger taking debug, which is --verbose, asked for it.
 func TestDropsGoToTheLogAndNotTheBody(t *testing.T) {
-	logged := &bytes.Buffer{}
-	server := listen(t, serve.Config{
-		Executor: fixtures("anthropic"),
-		Log:      slog.New(slog.NewTextHandler(logged, nil)),
-	})
-	answered := send(t, server, http.MethodPost, responses, addressed(t, droppableBody(), "anthropic"))
-
-	if answered.status != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
-	}
-	for _, leaked := range []string{"temperature", "dropped", "unsupported", "unimplemented"} {
-		if strings.Contains(answered.body, leaked) {
-			t.Errorf("the drop leaked into the answer as %q: %s", leaked, answered.body)
-		}
-	}
-	if !strings.Contains(logged.String(), "temperature") {
-		t.Errorf("the log does not report the drop: %q", logged.String())
-	}
-}
-
-// TestAnInertDropIsLoggedBelowAWarning keeps the warnings worth reading. A
-// field whose absence changed nothing recurs on every request of a kind, and an
-// operator who learns to skim those skims the drop that mattered with them.
-func TestAnInertDropIsLoggedBelowAWarning(t *testing.T) {
-	body := []byte(`{"model":"anthropic/claude-4-6","input":[{"type":"message","role":"user",` +
-		`"content":[{"type":"input_text","text":"hi"}]}],` +
-		`"text":{"format":{"type":"json_schema","name":"p","strict":true,"schema":{"type":"object"}}}}`)
-
-	warned, everything := &bytes.Buffer{}, &bytes.Buffer{}
+	quiet, verbose := &bytes.Buffer{}, &bytes.Buffer{}
 	for _, level := range []struct {
-		name string
 		sink *bytes.Buffer
 		opts *slog.HandlerOptions
 	}{
-		{name: "warn", sink: warned, opts: nil},
-		{name: "debug", sink: everything, opts: &slog.HandlerOptions{Level: slog.LevelDebug}},
+		{sink: quiet, opts: nil},
+		{sink: verbose, opts: &slog.HandlerOptions{Level: slog.LevelDebug}},
 	} {
 		server := listen(t, serve.Config{
 			Executor: fixtures("anthropic"),
 			Log:      slog.New(slog.NewTextHandler(level.sink, level.opts)),
 		})
-		if answered := send(t, server, http.MethodPost, responses, body); answered.status != http.StatusOK {
+		answered := send(t, server, http.MethodPost, responses, addressed(t, droppableBody(), "anthropic"))
+		if answered.status != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", answered.status, answered.body)
+		}
+		for _, leaked := range []string{"temperature", "dropped"} {
+			if strings.Contains(answered.body, leaked) {
+				t.Errorf("the drop leaked into the answer as %q: %s", leaked, answered.body)
+			}
 		}
 	}
 
-	if strings.Contains(warned.String(), "text.format") {
-		t.Errorf("an inert drop was raised as a warning: %q", warned.String())
+	if strings.Contains(quiet.String(), "temperature") {
+		t.Errorf("a drop was logged unasked: %q", quiet.String())
 	}
-	if !strings.Contains(everything.String(), "text.format") {
-		t.Errorf("an inert drop went unrecorded at debug: %q", everything.String())
+	if !strings.Contains(verbose.String(), "temperature") {
+		t.Errorf("the log does not report the drop: %q", verbose.String())
 	}
 }
 

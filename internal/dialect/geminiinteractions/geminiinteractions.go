@@ -42,15 +42,6 @@ func Dialect() dialect.Dialect {
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
-		DropTable: dialect.DropTable(map[string]base.DropReason{
-			"strict": base.DropUnsupported,
-			// There is no inline caching field here. Both routes that would
-			// stand in for one are stateful — CachedContent on the legacy API,
-			// or a previous interaction id — and a stateless proxy reaches
-			// neither.
-			"prompt_cache_key":     base.DropUnsupported,
-			"prompt_cache_options": base.DropUnsupported,
-		}),
 	}
 }
 
@@ -111,7 +102,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 			drops = append(drops, strictness(*format.Strict))
 		}
 		if format.Name != "" {
-			drops = append(drops, base.Drop{Path: "text.format.name", Reason: base.DropInert,
+			drops = append(drops, base.Drop{Path: "text.format.name",
 				Detail: Name + " has no name on a response format, and a label on a schema changes no answer"})
 		}
 	}
@@ -130,10 +121,10 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 // only asking to relax it is lost.
 func strictness(strict bool) base.Drop {
 	if strict {
-		return base.Drop{Path: "text.format.strict", Reason: base.DropInert,
+		return base.Drop{Path: "text.format.strict",
 			Detail: Name + " has no strictness flag: a response schema is always enforced"}
 	}
-	return base.Drop{Path: "text.format.strict", Reason: base.DropUnsupported,
+	return base.Drop{Path: "text.format.strict",
 		Detail: Name + " has no strictness flag: the schema is enforced though the request asked it not to be"}
 }
 
@@ -214,7 +205,6 @@ func markerDrops(items []base.Item) []base.Drop {
 			}
 			drops = append(drops, base.Drop{
 				Path:   dialect.MarkerPath(index, position),
-				Reason: base.DropUnsupported,
 				Detail: Name + " has no cache breakpoint, and both of its caching routes are stateful",
 			})
 		}
@@ -239,7 +229,6 @@ func toolChoice(req base.Request) (any, []base.Drop) {
 	if base.HasMixedStrictness(req.Tools) {
 		drops = append(drops, base.Drop{
 			Path:   "tools[].strict",
-			Reason: base.DropUnsupported,
 			Detail: Name + " carries strictness per request, not per tool; a mix cannot be expressed",
 		})
 	}

@@ -7,26 +7,6 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
-// Current reasoning models reject or ignore the sampling parameters, token
-// probabilities pin a caller to one model, and logit bias is meaningless across
-// providers because token ids are tokenizer-specific.
-var outOfScope = []string{
-	"temperature", "top_p", "top_k", "seed",
-	"frequency_penalty", "presence_penalty", "logit_bias",
-	"logprobs", "top_logprobs", "n",
-}
-
-func DropTable(own map[string]base.DropReason) map[string]base.DropReason {
-	table := make(map[string]base.DropReason, len(outOfScope)+len(own))
-	for _, field := range outOfScope {
-		table[field] = base.DropUnsupported
-	}
-	for field, reason := range own {
-		table[field] = reason
-	}
-	return table
-}
-
 func Prefixed(drops []base.Drop, prefix string) []base.Drop {
 	rooted := make([]base.Drop, 0, len(drops))
 	for _, drop := range drops {
@@ -47,7 +27,6 @@ func Prefixed(drops []base.Drop, prefix string) []base.Drop {
 func Unmapped(path, kind, name string) base.Drop {
 	return base.Drop{
 		Path:   path,
-		Reason: base.DropUnimplemented,
 		Detail: kind + " " + name + " is not carried by the base",
 	}
 }

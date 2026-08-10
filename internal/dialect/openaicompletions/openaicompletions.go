@@ -47,7 +47,6 @@ func Dialect() dialect.Dialect {
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
-		DropTable:    dialect.DropTable(nil),
 	}
 }
 
@@ -124,7 +123,6 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 			body["response_format"] = map[string]any{"type": "json_object"}
 			drops = append(drops, base.Drop{
 				Path:   "text.format",
-				Reason: base.DropUnsupported,
 				Detail: fmt.Sprintf("%s has no schema mode; the schema was written into the prompt and is not enforced", backend.Name),
 			})
 		} else {
@@ -260,7 +258,6 @@ func markerDrops(items []base.Item) []base.Drop {
 			if part.Marks() && part.Text == "" {
 				drops = append(drops, base.Drop{
 					Path:   dialect.MarkerPath(index, position),
-					Reason: base.DropUnsupported,
 					Detail: "a breakpoint rides on a text part, and this part carries no text",
 				})
 			}

@@ -48,14 +48,8 @@ func Run(ctx context.Context, catalog core.Catalog, opts core.Options, streams S
 	if report.Verbose {
 		writeVerbose(streams.Err, result)
 	}
-	if runErr == nil {
-		reported := result.Drops
-		if !report.Verbose {
-			reported, _ = base.PartitionDrops(result.Drops)
-		}
-		if len(reported) > 0 {
-			fmt.Fprintln(streams.Err, base.FormatDrops(reported))
-		}
+	if runErr == nil && report.Verbose && len(result.Drops) > 0 {
+		fmt.Fprintln(streams.Err, base.FormatDrops(result.Drops))
 	}
 	if runErr != nil {
 		return fail(streams.Err, runErr)

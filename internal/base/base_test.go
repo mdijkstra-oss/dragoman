@@ -126,17 +126,6 @@ func TestDiffReportsUnconsumedPaths(t *testing.T) {
 	}
 }
 
-func TestClassifyDefaultsToUnimplemented(t *testing.T) {
-	table := map[string]DropReason{"temperature": DropUnsupported}
-	classified := Classify([]Drop{{Path: "temperature"}, {Path: "input[0].tone"}}, table)
-	if classified[0].Reason != DropUnsupported {
-		t.Errorf("temperature = %q, want %q", classified[0].Reason, DropUnsupported)
-	}
-	if classified[1].Reason != DropUnimplemented {
-		t.Errorf("tone = %q, want %q; the backlog has to stay visible", classified[1].Reason, DropUnimplemented)
-	}
-}
-
 func TestPatchIsByteIdenticalWithoutChanges(t *testing.T) {
 	raw := json.RawMessage(`{"b":1,"a":2,"nested":{"z":true}}`)
 	patched, err := Patch(raw, nil)

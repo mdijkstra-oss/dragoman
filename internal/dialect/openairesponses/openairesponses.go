@@ -27,7 +27,6 @@ func Dialect() dialect.Dialect {
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
-		DropTable:    map[string]base.DropReason{},
 	}
 }
 

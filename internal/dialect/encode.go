@@ -46,7 +46,6 @@ func FunctionTools(tools []base.Tool) ([]base.Tool, []base.Drop) {
 		}
 		drops = append(drops, base.Drop{
 			Path:   fmt.Sprintf("tools[%d]", index),
-			Reason: base.DropUnsupported,
 			Detail: "hosted tool " + tool.Type + " is not carried by the base",
 		})
 	}
@@ -67,7 +66,6 @@ func Unread(req base.Request, placed Carries) []base.Drop {
 	if req.ToolChoice != nil && !req.ToolChoice.Known() && carried["tool_choice"] {
 		drops = append(drops, base.Drop{
 			Path:   "tool_choice",
-			Reason: base.DropUnsupported,
 			Detail: "only a mode or a named function can be expressed in every dialect",
 		})
 	}

@@ -107,12 +107,6 @@ func TestCacheBreakpointBecomesEphemeralCacheControl(t *testing.T) {
 	if !hasDropPath(drops, modePath) {
 		t.Errorf("drops = %+v, want one at %s", drops, modePath)
 	}
-	for _, drop := range drops {
-		if drop.Path == modePath && drop.Reason != base.DropUnsupported {
-			t.Errorf("%s = %q, want %q: a cache_control has no field that means mode",
-				drop.Path, drop.Reason, base.DropUnsupported)
-		}
-	}
 }
 
 // TestCacheTTLTravelsVerbatimAndAbsentStaysAbsent covers the two TTL rows at

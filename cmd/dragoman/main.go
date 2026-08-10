@@ -52,13 +52,14 @@ type TranslateCmd struct {
 	File   string `help:"Read the request from a file instead of stdin." short:"f" type:"path"`
 	Output string `help:"Write the result to a file instead of stdout." short:"o" type:"path"`
 
-	ConfigFile string `help:"Service table to use instead of the built-in one." name:"config" type:"path"`
+	ConfigFile string `help:"Extra services. A file setting mode: override replaces the built-in table." name:"config" type:"path"`
 }
 
 type ServeCmd struct {
 	Addr       string `help:"Address to listen on." default:"127.0.0.1:8080"`
-	ConfigFile string `help:"Service table to serve instead of the built-in one." name:"config" type:"path"`
+	ConfigFile string `help:"Extra services. A file setting mode: override replaces the built-in table." name:"config" type:"path"`
 	Strict     bool   `help:"Treat any dropped field as an error, for every request served."`
+	Verbose    bool   `help:"Log every dropped field." short:"v"`
 }
 
 // A container built on scratch holds one file and no shell, so a runtime
@@ -71,7 +72,7 @@ type HealthCmd struct {
 }
 
 type ConfigCmd struct {
-	ConfigFile string `help:"Print this table instead of the built-in one." name:"config" type:"path"`
+	ConfigFile string `help:"Extra services. A file setting mode: override replaces the built-in table." name:"config" type:"path"`
 }
 
 func main() {
@@ -112,11 +113,11 @@ func run() int {
 }
 
 func translateCommand(cli TranslateCmd) int {
-	options, err := options(cli)
+	known, err := table(cli.ConfigFile)
 	if err != nil {
 		return fail(err)
 	}
-	known, err := table(cli.ConfigFile)
+	options, err := options(cli, known)
 	if err != nil {
 		return fail(err)
 	}
@@ -150,7 +151,7 @@ func serveCommand(cli ServeCmd) int {
 	if err != nil {
 		return fail(err)
 	}
-	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel(cli.Verbose)}))
 	handler := serve.New(serve.Config{
 		Catalog:    known,
 		Strict:     cli.Strict,
@@ -166,6 +167,15 @@ func serveCommand(cli ServeCmd) int {
 		return fail(err)
 	}
 	return int(core.ExitOK)
+}
+
+// Dropped fields are the only thing said below info, which is what --verbose is
+// for.
+func logLevel(verbose bool) slog.Level {
+	if verbose {
+		return slog.LevelDebug
+	}
+	return slog.LevelInfo
 }
 
 func names(known core.Catalog) []string {
@@ -201,15 +211,12 @@ func unhealthy(err error) int {
 }
 
 func configCommand(cli ConfigCmd) int {
-	document := config.Default
-	if cli.ConfigFile != "" {
-		read, err := os.ReadFile(cli.ConfigFile)
-		if err != nil {
-			return fail(err)
-		}
-		document = read
+	known, err := table(cli.ConfigFile)
+	if err != nil {
+		return fail(err)
 	}
-	if _, err := catalog.Load(document); err != nil {
+	document, err := config.Format(known.Presets)
+	if err != nil {
 		return fail(err)
 	}
 	os.Stdout.Write(document)
@@ -253,14 +260,14 @@ func parse(parser *kong.Kong, args []string) (command string, code int, parsed b
 	return strings.Fields(context.Command())[0], int(core.ExitOK), true
 }
 
-func options(cli TranslateCmd) (core.Options, error) {
+func options(cli TranslateCmd, known core.Catalog) (core.Options, error) {
 	if cli.Protocol != openairesponses.Name {
 		return core.Options{}, fmt.Errorf("unknown protocol %q", cli.Protocol)
 	}
 	if cli.Backend == "" && cli.BackendProtocol == "" {
 		return core.Options{}, fmt.Errorf(
 			"no backend: pass --backend (%s) or --backend-protocol (%s) with --endpoint",
-			strings.Join(catalog.PresetNames(), ", "),
+			strings.Join(names(known), ", "),
 			strings.Join(catalog.DialectNames(), ", "))
 	}
 	opts := core.Options{

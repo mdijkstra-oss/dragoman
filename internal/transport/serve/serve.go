@@ -176,13 +176,10 @@ func (s server) only(method string, next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s server) record(service string, drops []base.Drop) {
-	notable, inert := base.PartitionDrops(drops)
-	if len(notable) > 0 {
-		s.log.Warn("dropped fields", "service", service, "drops", notable)
+	if len(drops) == 0 {
+		return
 	}
-	if len(inert) > 0 {
-		s.log.Debug("dropped fields", "service", service, "drops", inert)
-	}
+	s.log.Debug("dropped fields", "service", service, "drops", drops)
 }
 
 func (s server) served(r *http.Request, opts core.Options, status int, elapsed time.Duration, usage *base.Usage) {

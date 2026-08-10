@@ -35,14 +35,6 @@ func Dialect() dialect.Dialect {
 		NewState:     func() dialect.State { return decodeState{} },
 		StreamPieces: streamPieces,
 		BodyPieces:   bodyPieces,
-		DropTable: dialect.DropTable(map[string]base.DropReason{
-			"strict": base.DropUnsupported,
-			"name":   base.DropUnsupported,
-			// A cache_control has a type and a TTL, nothing meaning OpenAI's
-			// mode, and no cache key of any kind.
-			"mode":             base.DropUnsupported,
-			"prompt_cache_key": base.DropUnsupported,
-		}),
 	}
 }
 
@@ -81,7 +73,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 		}
 		body.OutputConfig.Format = &wireFormat{Type: format.Type, Schema: format.Schema}
 		if format.Name != "" {
-			drops = append(drops, base.Drop{Path: "text.format.name", Reason: base.DropInert,
+			drops = append(drops, base.Drop{Path: "text.format.name",
 				Detail: Name + " has no name on a structured-output format, and a label on a schema changes no answer"})
 		}
 		if format.Strict != nil {
@@ -101,10 +93,10 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 // relax it is lost.
 func strictness(strict bool) base.Drop {
 	if strict {
-		return base.Drop{Path: "text.format.strict", Reason: base.DropInert,
+		return base.Drop{Path: "text.format.strict",
 			Detail: Name + " carries strictness per tool, and a format is always enforced"}
 	}
-	return base.Drop{Path: "text.format.strict", Reason: base.DropUnsupported,
+	return base.Drop{Path: "text.format.strict",
 		Detail: Name + " carries strictness per tool: the format is enforced though the request asked it not to be"}
 }
 
@@ -268,14 +260,14 @@ func markerDrops(items []base.Item) []base.Drop {
 			if part.Text == "" {
 				// A cache_control rides on a text block, and this part has no
 				// text to make one out of.
-				drops = append(drops, base.Drop{Path: path, Reason: base.DropUnsupported,
+				drops = append(drops, base.Drop{Path: path,
 					Detail: Name + " marks a text block, and this part carries no text"})
 				continue
 			}
 			if turnRole(item) == "" {
 				// The system prompt is one string here, so once the text is
 				// folded in there is no block left to mark.
-				drops = append(drops, base.Drop{Path: path, Reason: base.DropUnimplemented,
+				drops = append(drops, base.Drop{Path: path,
 					Detail: Name + " keeps instructions in system, which carries no block to mark"})
 				continue
 			}

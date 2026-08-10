@@ -94,7 +94,6 @@ func Translate(catalog Catalog, opts Options, body []byte) (base.Request, base.B
 	if err != nil {
 		return req, backend, spoken, dialect.Encoded{}, Fail(ExitUsage, "%s", err)
 	}
-	encoded.Drops = base.Classify(encoded.Drops, spoken.DropTable)
 	return req, backend, spoken, encoded, nil
 }
 
@@ -152,7 +151,7 @@ func Run(ctx context.Context, catalog Catalog, opts Options, body []byte, execut
 	}
 	folded = base.AsFormattedText(folded, req)
 	result.Usage = folded.Usage
-	result.Drops = base.MergeDrops(result.Drops, base.Classify(round.Drops, spoken.DropTable))
+	result.Drops = base.MergeDrops(result.Drops, round.Drops)
 	if opts.Strict && len(result.Drops) > 0 {
 		return result, Fail(ExitUsage, "strict: %d field(s) dropped:\n%s",
 			len(result.Drops), base.FormatDrops(result.Drops))

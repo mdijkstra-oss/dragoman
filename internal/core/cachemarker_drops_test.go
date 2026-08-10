@@ -37,8 +37,8 @@ func TestCacheBreakpointAgainstGeminiIsUnsupported(t *testing.T) {
 	// The path names the block, not the field: input[i].content[j] is the only
 	// depth a marker is reachable at, and the second part is the marked one.
 	const marker = "input[0].content[1].prompt_cache_breakpoint"
-	if reason := cacheDropReasons(drops)[marker]; reason != base.DropUnsupported {
-		t.Errorf("%s = %q, want %q; drops = %+v", marker, reason, base.DropUnsupported, drops)
+	if !hasDropPath(drops, marker) {
+		t.Errorf("%s went unreported; drops = %+v", marker, drops)
 	}
 	if !mentions(drops, "no cache breakpoint") {
 		t.Errorf("the drop does not say why it is permanent: %+v", drops)
@@ -57,8 +57,8 @@ func TestCacheBreakpointAgainstGeminiIsUnsupported(t *testing.T) {
 	// Both top-level fields go the same way, whole: there is nothing here that
 	// half of either one could land in.
 	for _, path := range []string{"prompt_cache_key", "prompt_cache_options"} {
-		if reason := cacheDropReasons(drops)[path]; reason != base.DropUnsupported {
-			t.Errorf("%s = %q, want %q; drops = %+v", path, reason, base.DropUnsupported, drops)
+		if !hasDropPath(drops, path) {
+			t.Errorf("%s went unreported; drops = %+v", path, drops)
 		}
 	}
 
@@ -79,16 +79,15 @@ func TestCacheBreakpointAgainstGeminiIsUnsupported(t *testing.T) {
 // that could not travel is named, and the whole object is not condemned with it.
 func TestCacheOptionsModeAgainstAnthropicIsDropped(t *testing.T) {
 	sent, drops := cacheDropSent(t, "anthropic", cacheDropBody)
-	reasons := cacheDropReasons(drops)
 
 	const mode = "prompt_cache_options.mode"
-	if reasons[mode] != base.DropUnsupported {
-		t.Errorf("%s = %q, want %q; drops = %+v", mode, reasons[mode], base.DropUnsupported, drops)
+	if !hasDropPath(drops, mode) {
+		t.Errorf("%s went unreported; drops = %+v", mode, drops)
 	}
-	if _, reported := reasons["prompt_cache_options"]; reported {
+	if hasDropPath(drops, "prompt_cache_options") {
 		t.Errorf("the whole object was reported as dropped, but its ttl travelled: %+v", drops)
 	}
-	if _, reported := reasons["prompt_cache_options.ttl"]; reported {
+	if hasDropPath(drops, "prompt_cache_options.ttl") {
 		t.Errorf("the ttl was reported as dropped, but it is placed on the block: %+v", drops)
 	}
 	if !strings.Contains(sent, `"cache_control":{"type":"ephemeral","ttl":"30m"}`) {
@@ -101,20 +100,19 @@ func TestCacheOptionsModeAgainstAnthropicIsDropped(t *testing.T) {
 	// The breakpoint's own mode is the second half of the same rule, at its own
 	// path. Both are the caller's bytes, and neither is guessed at.
 	const marker = "input[0].content[1].prompt_cache_breakpoint.mode"
-	if reasons[marker] != base.DropUnsupported {
-		t.Errorf("%s = %q, want %q; drops = %+v", marker, reasons[marker], base.DropUnsupported, drops)
+	if !hasDropPath(drops, marker) {
+		t.Errorf("%s went unreported; drops = %+v", marker, drops)
 	}
 }
 
 // TestCacheKeyAgainstAnthropicIsDropped covers the key row. This dialect has no
-// cache key of any kind — the prefix is the key — so the field is unsupported
-// rather than a mapping nobody has written yet, and it never reaches the wire
-// under any name.
+// cache key of any kind — the prefix is the key — so the field is reported and
+// never reaches the wire under any name.
 func TestCacheKeyAgainstAnthropicIsDropped(t *testing.T) {
 	sent, drops := cacheDropSent(t, "anthropic", cacheDropBody)
 
-	if reason := cacheDropReasons(drops)["prompt_cache_key"]; reason != base.DropUnsupported {
-		t.Errorf("prompt_cache_key = %q, want %q; drops = %+v", reason, base.DropUnsupported, drops)
+	if !hasDropPath(drops, "prompt_cache_key") {
+		t.Errorf("prompt_cache_key went unreported; drops = %+v", drops)
 	}
 	for _, spelling := range []string{"prompt_cache_key", "tenant-7", "cache_key"} {
 		if strings.Contains(sent, spelling) {
@@ -278,16 +276,6 @@ func cacheDropSent(t *testing.T, preset, body string) (string, []base.Drop) {
 		t.Fatalf("translate for %s: %v", preset, err)
 	}
 	return string(result.Sent), result.Drops
-}
-
-// cacheDropReasons indexes drops by path, so a table can state the reason a path
-// was reported with and not merely that it appeared.
-func cacheDropReasons(drops []base.Drop) map[string]base.DropReason {
-	reasons := map[string]base.DropReason{}
-	for _, drop := range drops {
-		reasons[drop.Path] = drop.Reason
-	}
-	return reasons
 }
 
 // cacheDropMarked builds one user turn whose every part carries a marker.

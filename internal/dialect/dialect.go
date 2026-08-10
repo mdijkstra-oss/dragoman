@@ -21,8 +21,6 @@ type Dialect struct {
 
 	NewState func() State
 
-	DropTable map[string]base.DropReason
-
 	StreamUpstream bool
 }
 

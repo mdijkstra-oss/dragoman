@@ -222,20 +222,16 @@ func TestStrictRefusesToSendOnADrop(t *testing.T) {
 	}
 }
 
-// TestDropsAreReportedWithPathsAndReasons checks the two reasons are kept
-// apart, because they have opposite lifetimes.
-func TestDropsAreReportedWithPathsAndReasons(t *testing.T) {
+// TestDropsAreReportedWithPaths covers a field the base knows and a field
+// invented by the caller: both are lost, and both are named at the path the
+// caller wrote.
+func TestDropsAreReportedWithPaths(t *testing.T) {
 	body := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"temperature":0.7,"tone":"warm"}`)
 	_, drops := translate(t, core.Options{Preset: "gemini"}, body)
-	reasons := map[string]base.DropReason{}
-	for _, drop := range drops {
-		reasons[drop.Path] = drop.Reason
-	}
-	if reasons["temperature"] != base.DropUnsupported {
-		t.Errorf("temperature = %q, want %q", reasons["temperature"], base.DropUnsupported)
-	}
-	if reasons["tone"] != base.DropUnimplemented {
-		t.Errorf("tone = %q, want %q", reasons["tone"], base.DropUnimplemented)
+	for _, path := range []string{"temperature", "tone"} {
+		if !hasDropPath(drops, path) {
+			t.Errorf("%s went unreported; drops = %+v", path, drops)
+		}
 	}
 }
 
@@ -297,40 +293,40 @@ func TestSchemaAsPromptIsRefusedOffCompletions(t *testing.T) {
 	}
 }
 
-// TestAFormatLabelIsAnInertDrop covers the third reason. Two dialects carry a
-// schema without carrying its name or its strict flag, and a schema they carry
-// is enforced anyway — so the request that asked for strict got what it asked
-// for, and only the request that asked to relax it lost something.
-func TestAFormatLabelIsAnInertDrop(t *testing.T) {
+// TestAFormatLabelIsDroppedWithItsExplanation covers a loss that costs the
+// caller nothing beside one that does. Two dialects carry a schema without
+// carrying its name or its strict flag, and a schema they carry is enforced
+// anyway — so the request that asked for strict got what it asked for, and only
+// the request that asked to relax it lost something. Both are reported, and the
+// sentence is what tells them apart.
+func TestAFormatLabelIsDroppedWithItsExplanation(t *testing.T) {
 	body := func(strict string) []byte {
 		return []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],` +
 			`"text":{"format":{"type":"json_schema","name":"p","strict":` + strict + `,"schema":{"type":"object"}}}}`)
 	}
 	for _, preset := range []string{"gemini", "anthropic"} {
 		t.Run(preset, func(t *testing.T) {
-			_, drops := translate(t, core.Options{Preset: preset}, body("true"))
-			for _, drop := range drops {
-				if drop.Reason != base.DropInert {
-					t.Errorf("%s = %q, want %q; nothing about the answer differs",
-						drop.Path, drop.Reason, base.DropInert)
+			_, enforced := translate(t, core.Options{Preset: preset}, body("true"))
+			for _, path := range []string{"text.format.name", "text.format.strict"} {
+				if !hasDropPath(enforced, path) {
+					t.Errorf("%s went unreported; drops = %+v", path, enforced)
 				}
-				if drop.Notable() {
-					t.Errorf("%s is notable, and a warning about it is one to skim past", drop.Path)
+			}
+			for _, drop := range enforced {
+				if drop.Detail == "" {
+					t.Errorf("%s is dropped without saying what it cost: %+v", drop.Path, enforced)
 				}
+			}
+			if mentions(enforced, "asked it not to be") {
+				t.Errorf("a request that got the enforcement it asked for was told it lost it: %+v", enforced)
 			}
 
 			_, relaxed := translate(t, core.Options{Preset: preset}, body("false"))
-			for _, drop := range relaxed {
-				if drop.Path != "text.format.strict" {
-					continue
-				}
-				if drop.Reason != base.DropUnsupported {
-					t.Errorf("relaxed strict = %q, want %q; the schema is enforced regardless",
-						drop.Reason, base.DropUnsupported)
-				}
-			}
 			if !hasDropPath(relaxed, "text.format.strict") {
 				t.Errorf("a request that asked to relax the schema was told nothing: %v", relaxed)
+			}
+			if !mentions(relaxed, "asked it not to be") {
+				t.Errorf("the caller is not told the schema is enforced against the request: %+v", relaxed)
 			}
 		})
 	}
