@@ -72,9 +72,6 @@ func (s server) translate(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusBadRequest, fmt.Sprintf("reading request body: %s", err))
 		return
 	}
-	if breakpointsDisabled(r.URL.Query().Get(breakpointsParam)) {
-		body = stripCacheBreakpoints(body)
-	}
 	req, err := base.ParseRequest(body)
 	if err != nil {
 		s.fail(w, r, http.StatusBadRequest, err.Error())
