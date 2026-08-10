@@ -19,7 +19,7 @@ dragoman serve --addr 127.0.0.1:8080
 
 ## Services
 
-A service is a name for a provider. dragoman ships with seven, embedded in the binary:
+A service is a name for a provider. dragoman ships with six, embedded in the binary:
 
 | service | set this variable | endpoint | protocol |
 |---|---|---|---|
@@ -237,3 +237,9 @@ go test ./...
 The suite runs offline against responses recorded from live backends in `testdata/fixtures/`, and over a real `httptest` server for the listener. No key and no network are needed.
 
 OpenAI's own chat endpoint has no recorded fixture, so `openai-chat` is covered by translation assertions rather than by a round trip.
+
+## License
+
+AGPL-3.0. The full text is in [LICENSE](./LICENSE).
+
+AGPL-3.0 is strong copyleft, and its network clause applies where no copy is distributed at all: anyone who runs a modified dragoman as a network service must offer the source of that version to the users that service reaches. Read the terms before deploying a modified copy, not after.
