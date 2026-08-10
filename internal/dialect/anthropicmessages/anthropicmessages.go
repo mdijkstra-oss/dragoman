@@ -17,10 +17,6 @@ const Name = "anthropic-messages"
 // request is rejected before it is read.
 const Version = "2023-06-01"
 
-// On a reasoning model the cap covers thinking and output together, so a small
-// one truncates mid-thought.
-const DefaultMaxTokens = 20000
-
 func Dialect() dialect.Dialect {
 	return dialect.Dialect{
 		Name: Name,
@@ -63,10 +59,7 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 	}
 	drops = append(drops, dialect.Unread(req, placedFields)...)
 
-	cap, capDrops := outputCap(req, backend)
-	drops = append(drops, capDrops...)
-
-	body := wireRequest{Model: base.GetModel(req), MaxTokens: cap, Stream: stream}
+	body := wireRequest{Model: base.GetModel(req), MaxTokens: outputCap(req), Stream: stream}
 
 	system, messages, itemDrops, err := buildMessages(req)
 	if err != nil {
@@ -116,12 +109,12 @@ func strictness(strict bool) base.Drop {
 }
 
 // This wire format will not accept a request without an output cap.
-func outputCap(req base.Request, backend base.Backend) (*int, []base.Drop) {
-	cap := DefaultMaxTokens
+func outputCap(req base.Request) *int {
+	cap := base.DefaultMaxOutputTokens
 	if req.MaxOutputTokens != nil {
 		cap = *req.MaxOutputTokens
 	}
-	return &cap, nil
+	return &cap
 }
 
 func applyTools(body *wireRequest, req base.Request) []base.Drop {
@@ -173,10 +166,6 @@ func reasoningTurn(item base.Item) string {
 func assistantTurn(base.Item) string { return base.RoleAssistant }
 
 func userTurn(base.Item) string { return base.RoleUser }
-
-func cannot(backend base.Backend, path, detail string) base.Drop {
-	return base.Drop{Path: path, Reason: base.DropUnsupported, Detail: backend.Name + " " + detail}
-}
 
 // A tool result must sit in the user message immediately following the assistant
 // message holding its call.

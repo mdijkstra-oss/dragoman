@@ -40,19 +40,20 @@ func translate(t *testing.T, opts core.Options, body []byte) (map[string]any, []
 }
 
 // TestRoundTripThroughBaseIsByteIdentical checks the one edge where the base
-// and the wire format are the same bytes. Nothing is re-serialised, so a
-// Responses request handed to a Responses backend arrives unchanged.
+// and the wire format are the same bytes. A body that already names an output
+// cap leaves nothing to fill in, so nothing is re-serialised and a Responses
+// request handed to a Responses backend arrives unchanged.
 func TestRoundTripThroughBaseIsByteIdentical(t *testing.T) {
 	const items = `[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]`
 	cases := []struct {
 		name string
 		body string
 	}{
-		{name: "stream stated", body: `{"model":"m","input":` + items + `,"stream":false}`},
+		{name: "stream stated", body: `{"model":"m","input":` + items + `,"max_output_tokens":512,"stream":false}`},
 		// An absent stream already means false, so nothing needs writing in.
-		{name: "stream absent", body: `{"model":"m","input":` + items + `}`},
-		{name: "key order preserved", body: `{"input":` + items + `,"instructions":"be terse","model":"m"}`},
-		{name: "reasoning stated", body: `{"model":"m","reasoning":{"effort":"low"},"input":` + items + `}`},
+		{name: "stream absent", body: `{"model":"m","input":` + items + `,"max_output_tokens":512}`},
+		{name: "key order preserved", body: `{"input":` + items + `,"instructions":"be terse","max_output_tokens":512,"model":"m"}`},
+		{name: "reasoning stated", body: `{"model":"m","reasoning":{"effort":"low"},"input":` + items + `,"max_output_tokens":512}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -83,7 +84,7 @@ func TestTranslatesForEveryBackend(t *testing.T) {
 	}{
 		{
 			preset:  "openai",
-			wants:   map[string]string{"reasoning.effort": "medium"},
+			wants:   map[string]string{"reasoning.effort": "medium", "max_output_tokens": "20000"},
 			toolsAt: "tools.0.name",
 		},
 		{
@@ -94,14 +95,14 @@ func TestTranslatesForEveryBackend(t *testing.T) {
 		},
 		{
 			preset:  "gemini",
-			wants:   map[string]string{"generation_config.thinking_level": "medium"},
+			wants:   map[string]string{"generation_config.thinking_level": "medium", "generation_config.max_output_tokens": "20000"},
 			absent:  []string{"reasoning", "reasoning_effort", "max_output_tokens"},
 			toolsAt: "tools.0.name",
 		},
 		{
 			preset:  "deepseek",
-			wants:   map[string]string{"reasoning_effort": "medium"},
-			absent:  []string{"reasoning", "max_tokens"},
+			wants:   map[string]string{"reasoning_effort": "medium", "max_tokens": "20000"},
+			absent:  []string{"reasoning"},
 			toolsAt: "tools.0.function.name",
 		},
 	}
@@ -157,7 +158,7 @@ func TestAbsentStaysAbsent(t *testing.T) {
 	homes := map[string]string{
 		"openai":    "reasoning",
 		"anthropic": "output_config",
-		"gemini":    "generation_config",
+		"gemini":    "generation_config.thinking_level",
 		"deepseek":  "reasoning_effort",
 	}
 	for preset, home := range homes {
@@ -170,9 +171,8 @@ func TestAbsentStaysAbsent(t *testing.T) {
 	}
 }
 
-// TestOutputCapPrecedence covers the two mechanisms, which are not
-// interchangeable: a flag that sets a field, and a per-backend fallback that
-// fires only when a backend requires a field nothing else supplied.
+// TestOutputCapPrecedence covers the order the cap is settled in: the flag,
+// then the body, then the one default every backend shares.
 func TestOutputCapPrecedence(t *testing.T) {
 	withCap := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"max_output_tokens":512}`)
 	withoutCap := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`)
@@ -186,12 +186,12 @@ func TestOutputCapPrecedence(t *testing.T) {
 		path   string
 		want   string
 	}{
-		{name: "anthropic invents when nothing supplied", preset: "anthropic", body: withoutCap, path: "max_tokens", want: "20000"},
+		{name: "anthropic defaults", preset: "anthropic", body: withoutCap, path: "max_tokens", want: "20000"},
 		{name: "anthropic takes the body", preset: "anthropic", body: withCap, path: "max_tokens", want: "512"},
-		{name: "anthropic flag wins over body and fallback", preset: "anthropic", body: withCap, flag: &flagged, path: "max_tokens", want: "99"},
-		{name: "openai invents nothing", preset: "openai", body: withoutCap, path: "max_output_tokens", want: ""},
-		{name: "gemini invents nothing", preset: "gemini", body: withoutCap, path: "generation_config.max_output_tokens", want: ""},
-		{name: "deepseek invents nothing", preset: "deepseek", body: withoutCap, path: "max_tokens", want: ""},
+		{name: "anthropic flag wins over body and default", preset: "anthropic", body: withCap, flag: &flagged, path: "max_tokens", want: "99"},
+		{name: "openai defaults", preset: "openai", body: withoutCap, path: "max_output_tokens", want: "20000"},
+		{name: "gemini defaults", preset: "gemini", body: withoutCap, path: "generation_config.max_output_tokens", want: "20000"},
+		{name: "deepseek defaults", preset: "deepseek", body: withoutCap, path: "max_tokens", want: "20000"},
 		{name: "deepseek flag wins", preset: "deepseek", body: withoutCap, flag: &flagged, path: "max_tokens", want: "99"},
 		{name: "openai-chat spells the cap differently", preset: "openai-chat", body: withoutCap, flag: &flagged, path: "max_completion_tokens", want: "99"},
 	}

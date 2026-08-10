@@ -183,16 +183,15 @@ func TestCacheFieldsAreNoDropWhereTheyAreCarried(t *testing.T) {
 	})
 }
 
-// TestNoCacheMarkerIsByteIdenticalToThePreFeatureWire is the regression this
-// feature is judged on, and the reason the want strings below are bytes rather
-// than a decoded shape. Each one was produced by the commit before breakpoints
-// existed, at --no-execute, buffered and streamed, over the bodies whose
-// handling the change touched: a bare string input, multiple content parts, a
-// collapsed assistant run whose text is joined with a gap, empty parts, a system
-// turn, tools with a call and a result, and the fixture the live matrix sends. A
-// caller who never asked for caching must not get a new request shape — a parts
-// array where a bare string used to go is a different body for every one of
-// them.
+// TestNoCacheMarkerIsByteIdenticalToThePreFeatureWire is the regression the
+// cache-marker feature is judged on, and the reason the want strings below are
+// bytes rather than a decoded shape. Each one is the wire at --no-execute,
+// buffered and streamed, for the bodies whose handling markers touch: a bare
+// string input, multiple content parts, a collapsed assistant run whose text is
+// joined with a gap, empty parts, a system turn, tools with a call and a
+// result, and the fixture the live matrix sends. A caller who never asked for
+// caching must not get a new request shape — a parts array where a bare string
+// used to go is a different body for every one of them.
 func TestNoCacheMarkerIsByteIdenticalToThePreFeatureWire(t *testing.T) {
 	for _, testCase := range noMarkerGolden {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -303,8 +302,7 @@ func cacheDropMarked(parts int) string {
 }
 
 // noMarkerCase is a request that mentions no caching field, paired with the
-// bytes each dialect sent for it before this feature existed, keyed by
-// preset/mode.
+// bytes each dialect sends for it, keyed by preset/mode.
 type noMarkerCase struct {
 	name string
 	body string
@@ -318,14 +316,14 @@ var noMarkerGolden = []noMarkerCase{
 		want: map[string]string{
 			"anthropic/buffered":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"assistant","content":[{"type":"text","text":"First."},{"type":"text","text":"Second."}]},{"role":"user","content":[{"type":"text","text":"more"}]}],"stream":true}`,
 			"anthropic/streamed":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"assistant","content":[{"type":"text","text":"First."},{"type":"text","text":"Second."}]},{"role":"user","content":[{"type":"text","text":"more"}]}],"stream":true}`,
-			"deepseek/buffered":    `{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":false}`,
-			"deepseek/streamed":    `{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
-			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]},{"type":"model_output","content":[{"type":"text","text":"First."}]},{"type":"model_output","content":[{"type":"text","text":"Second."}]},{"type":"user_input","content":[{"type":"text","text":"more"}]}],"stream":false}`,
-			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]},{"type":"model_output","content":[{"type":"text","text":"First."}]},{"type":"model_output","content":[{"type":"text","text":"Second."}]},{"type":"user_input","content":[{"type":"text","text":"more"}]}],"stream":true}`,
-			"openai/buffered":      `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"First."}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Second."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"more"}]}]}`,
-			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"First."}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Second."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"more"}]}],"model":"m","stream":true}`,
-			"openai-chat/buffered": `{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":false}`,
-			"openai-chat/streamed": `{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"deepseek/buffered":    `{"max_tokens":20000,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":false}`,
+			"deepseek/streamed":    `{"max_tokens":20000,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]},{"type":"model_output","content":[{"type":"text","text":"First."}]},{"type":"model_output","content":[{"type":"text","text":"Second."}]},{"type":"user_input","content":[{"type":"text","text":"more"}]}],"generation_config":{"max_output_tokens":20000},"stream":false}`,
+			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]},{"type":"model_output","content":[{"type":"text","text":"First."}]},{"type":"model_output","content":[{"type":"text","text":"Second."}]},{"type":"user_input","content":[{"type":"text","text":"more"}]}],"generation_config":{"max_output_tokens":20000},"stream":true}`,
+			"openai/buffered":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"First."}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Second."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"more"}]}],"max_output_tokens":20000,"model":"m"}`,
+			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"First."}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Second."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"more"}]}],"max_output_tokens":20000,"model":"m","stream":true}`,
+			"openai-chat/buffered": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":false}`,
+			"openai-chat/streamed": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"First.\n\nSecond."},{"role":"user","content":"more"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
 		},
 	},
 	{
@@ -334,14 +332,14 @@ var noMarkerGolden = []noMarkerCase{
 		want: map[string]string{
 			"anthropic/buffered":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":""}]},{"role":"assistant","content":[{"type":"text","text":""}]},{"role":"user","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
 			"anthropic/streamed":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":""}]},{"role":"assistant","content":[{"type":"text","text":""}]},{"role":"user","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
-			"deepseek/buffered":    `{"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
-			"deepseek/streamed":    `{"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
-			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":""}]},{"type":"model_output","content":[{"type":"text","text":""}]},{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"stream":false}`,
-			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":""}]},{"type":"model_output","content":[{"type":"text","text":""}]},{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
-			"openai/buffered":      `{"model":"m","input":[{"type":"message","role":"user","content":[]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":""}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`,
-			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":""}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"model":"m","stream":true}`,
-			"openai-chat/buffered": `{"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
-			"openai-chat/streamed": `{"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"deepseek/buffered":    `{"max_tokens":20000,"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
+			"deepseek/streamed":    `{"max_tokens":20000,"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":""}]},{"type":"model_output","content":[{"type":"text","text":""}]},{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"generation_config":{"max_output_tokens":20000},"stream":false}`,
+			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":""}]},{"type":"model_output","content":[{"type":"text","text":""}]},{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"generation_config":{"max_output_tokens":20000},"stream":true}`,
+			"openai/buffered":      `{"input":[{"type":"message","role":"user","content":[]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":""}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"max_output_tokens":20000,"model":"m"}`,
+			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":""}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"max_output_tokens":20000,"model":"m","stream":true}`,
+			"openai-chat/buffered": `{"max_completion_tokens":20000,"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
+			"openai-chat/streamed": `{"max_completion_tokens":20000,"messages":[{"role":"user"},{"role":"assistant"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
 		},
 	},
 	{
@@ -350,14 +348,14 @@ var noMarkerGolden = []noMarkerCase{
 		want: map[string]string{
 			"anthropic/buffered":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"first part second part"}]}],"stream":true}`,
 			"anthropic/streamed":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"first part second part"}]}],"stream":true}`,
-			"deepseek/buffered":    `{"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":false}`,
-			"deepseek/streamed":    `{"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
-			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"first part second part"}]}],"stream":false}`,
-			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"first part second part"}]}],"stream":true}`,
-			"openai/buffered":      `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"first part "},{"type":"input_text","text":"second part"}]}]}`,
-			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"first part "},{"type":"input_text","text":"second part"}]}],"model":"m","stream":true}`,
-			"openai-chat/buffered": `{"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":false}`,
-			"openai-chat/streamed": `{"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"deepseek/buffered":    `{"max_tokens":20000,"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":false}`,
+			"deepseek/streamed":    `{"max_tokens":20000,"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"first part second part"}]}],"generation_config":{"max_output_tokens":20000},"stream":false}`,
+			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"first part second part"}]}],"generation_config":{"max_output_tokens":20000},"stream":true}`,
+			"openai/buffered":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"first part "},{"type":"input_text","text":"second part"}]}],"max_output_tokens":20000,"model":"m"}`,
+			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"first part "},{"type":"input_text","text":"second part"}]}],"max_output_tokens":20000,"model":"m","stream":true}`,
+			"openai-chat/buffered": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":false}`,
+			"openai-chat/streamed": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"first part second part"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
 		},
 	},
 	{
@@ -366,14 +364,14 @@ var noMarkerGolden = []noMarkerCase{
 		want: map[string]string{
 			"anthropic/buffered":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
 			"anthropic/streamed":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
-			"deepseek/buffered":    `{"messages":[{"role":"user","content":"hi"}],"model":"m","stream":false}`,
-			"deepseek/streamed":    `{"messages":[{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
-			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"stream":false}`,
-			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
-			"openai/buffered":      `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`,
-			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"model":"m","stream":true}`,
-			"openai-chat/buffered": `{"messages":[{"role":"user","content":"hi"}],"model":"m","stream":false}`,
-			"openai-chat/streamed": `{"messages":[{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"deepseek/buffered":    `{"max_tokens":20000,"messages":[{"role":"user","content":"hi"}],"model":"m","stream":false}`,
+			"deepseek/streamed":    `{"max_tokens":20000,"messages":[{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"generation_config":{"max_output_tokens":20000},"stream":false}`,
+			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"generation_config":{"max_output_tokens":20000},"stream":true}`,
+			"openai/buffered":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"max_output_tokens":20000,"model":"m"}`,
+			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"max_output_tokens":20000,"model":"m","stream":true}`,
+			"openai-chat/buffered": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"hi"}],"model":"m","stream":false}`,
+			"openai-chat/streamed": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
 		},
 	},
 	{
@@ -382,14 +380,14 @@ var noMarkerGolden = []noMarkerCase{
 		want: map[string]string{
 			"anthropic/buffered":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"Say hi."}]}],"stream":true}`,
 			"anthropic/streamed":   `{"model":"m","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"Say hi."}]}],"stream":true}`,
-			"deepseek/buffered":    `{"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":false}`,
-			"deepseek/streamed":    `{"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
-			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"Say hi."}]}],"stream":false}`,
-			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"Say hi."}]}],"stream":true}`,
-			"openai/buffered":      `{"model":"m","input":"Say hi."}`,
-			"openai/streamed":      `{"input":"Say hi.","model":"m","stream":true}`,
-			"openai-chat/buffered": `{"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":false}`,
-			"openai-chat/streamed": `{"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"deepseek/buffered":    `{"max_tokens":20000,"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":false}`,
+			"deepseek/streamed":    `{"max_tokens":20000,"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"Say hi."}]}],"generation_config":{"max_output_tokens":20000},"stream":false}`,
+			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"Say hi."}]}],"generation_config":{"max_output_tokens":20000},"stream":true}`,
+			"openai/buffered":      `{"input":"Say hi.","max_output_tokens":20000,"model":"m"}`,
+			"openai/streamed":      `{"input":"Say hi.","max_output_tokens":20000,"model":"m","stream":true}`,
+			"openai-chat/buffered": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":false}`,
+			"openai-chat/streamed": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"Say hi."}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
 		},
 	},
 	{
@@ -398,14 +396,14 @@ var noMarkerGolden = []noMarkerCase{
 		want: map[string]string{
 			"anthropic/buffered":   `{"model":"m","max_tokens":20000,"system":"be terse\n\nyou are helpful\n\nprefer bullets","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
 			"anthropic/streamed":   `{"model":"m","max_tokens":20000,"system":"be terse\n\nyou are helpful\n\nprefer bullets","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"stream":true}`,
-			"deepseek/buffered":    `{"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
-			"deepseek/streamed":    `{"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
-			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"system_instruction":"be terse\n\nyou are helpful\n\nprefer bullets","stream":false}`,
-			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"system_instruction":"be terse\n\nyou are helpful\n\nprefer bullets","stream":true}`,
-			"openai/buffered":      `{"model":"m","instructions":"be terse","input":[{"type":"message","role":"system","content":[{"type":"input_text","text":"you are helpful"}]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"prefer bullets"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`,
-			"openai/streamed":      `{"input":[{"type":"message","role":"system","content":[{"type":"input_text","text":"you are helpful"}]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"prefer bullets"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"instructions":"be terse","model":"m","stream":true}`,
-			"openai-chat/buffered": `{"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
-			"openai-chat/streamed": `{"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"deepseek/buffered":    `{"max_tokens":20000,"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
+			"deepseek/streamed":    `{"max_tokens":20000,"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
+			"gemini/buffered":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"system_instruction":"be terse\n\nyou are helpful\n\nprefer bullets","generation_config":{"max_output_tokens":20000},"stream":false}`,
+			"gemini/streamed":      `{"model":"m","input":[{"type":"user_input","content":[{"type":"text","text":"hi"}]}],"system_instruction":"be terse\n\nyou are helpful\n\nprefer bullets","generation_config":{"max_output_tokens":20000},"stream":true}`,
+			"openai/buffered":      `{"input":[{"type":"message","role":"system","content":[{"type":"input_text","text":"you are helpful"}]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"prefer bullets"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"instructions":"be terse","max_output_tokens":20000,"model":"m"}`,
+			"openai/streamed":      `{"input":[{"type":"message","role":"system","content":[{"type":"input_text","text":"you are helpful"}]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"prefer bullets"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"instructions":"be terse","max_output_tokens":20000,"model":"m","stream":true}`,
+			"openai-chat/buffered": `{"max_completion_tokens":20000,"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":false}`,
+			"openai-chat/streamed": `{"max_completion_tokens":20000,"messages":[{"role":"system","content":"be terse"},{"role":"system","content":"you are helpful"},{"role":"developer","content":"prefer bullets"},{"role":"user","content":"hi"}],"model":"m","stream":true,"stream_options":{"include_usage":true}}`,
 		},
 	},
 	{
@@ -440,28 +438,16 @@ var noMarkerGolden = []noMarkerCase{
 }
 `,
 		want: map[string]string{
-			"anthropic/buffered": `{"model":"gpt-5.4-mini","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"name":"get_weather","description":"Get the current weather in a given location","input_schema":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}],"output_config":{"effort":"medium"},"stream":true}`,
-			"anthropic/streamed": `{"model":"gpt-5.4-mini","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"name":"get_weather","description":"Get the current weather in a given location","input_schema":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}],"output_config":{"effort":"medium"},"stream":true}`,
-			"deepseek/buffered":  `{"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
-			"deepseek/streamed":  `{"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":true,"stream_options":{"include_usage":true},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
-			"gemini/buffered":    `{"model":"gpt-5.4-mini","input":[{"type":"user_input","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"type":"function","name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false}}],"generation_config":{"thinking_level":"medium","tool_choice":"validated"},"stream":false}`,
-			"gemini/streamed":    `{"model":"gpt-5.4-mini","input":[{"type":"user_input","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"type":"function","name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false}}],"generation_config":{"thinking_level":"medium","tool_choice":"validated"},"stream":true}`,
-			"openai/buffered": `{
-  "model": "gpt-5.4-mini",
-  "input": [
-    {"type":"message","role":"user","content":[{"type":"input_text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}
-  ],
-  "tools": [
-    {"type":"function","name":"get_weather","description":"Get the current weather in a given location",
-     "parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},
-     "strict":true}
-  ],
-  "reasoning": {"effort":"medium"}
-}
-`,
-			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"model":"gpt-5.4-mini","reasoning":{"effort":"medium"},"stream":true,"tools":[{"type":"function","name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}]}`,
-			"openai-chat/buffered": `{"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
-			"openai-chat/streamed": `{"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":true,"stream_options":{"include_usage":true},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
+			"anthropic/buffered":   `{"model":"gpt-5.4-mini","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"name":"get_weather","description":"Get the current weather in a given location","input_schema":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}],"output_config":{"effort":"medium"},"stream":true}`,
+			"anthropic/streamed":   `{"model":"gpt-5.4-mini","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"name":"get_weather","description":"Get the current weather in a given location","input_schema":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}],"output_config":{"effort":"medium"},"stream":true}`,
+			"deepseek/buffered":    `{"max_tokens":20000,"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
+			"deepseek/streamed":    `{"max_tokens":20000,"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":true,"stream_options":{"include_usage":true},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
+			"gemini/buffered":      `{"model":"gpt-5.4-mini","input":[{"type":"user_input","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"type":"function","name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false}}],"generation_config":{"max_output_tokens":20000,"thinking_level":"medium","tool_choice":"validated"},"stream":false}`,
+			"gemini/streamed":      `{"model":"gpt-5.4-mini","input":[{"type":"user_input","content":[{"type":"text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"tools":[{"type":"function","name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false}}],"generation_config":{"max_output_tokens":20000,"thinking_level":"medium","tool_choice":"validated"},"stream":true}`,
+			"openai/buffered":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"max_output_tokens":20000,"model":"gpt-5.4-mini","reasoning":{"effort":"medium"},"tools":[{"type":"function","name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}]}`,
+			"openai/streamed":      `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}]}],"max_output_tokens":20000,"model":"gpt-5.4-mini","reasoning":{"effort":"medium"},"stream":true,"tools":[{"type":"function","name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}]}`,
+			"openai-chat/buffered": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
+			"openai-chat/streamed": `{"max_completion_tokens":20000,"messages":[{"role":"user","content":"What is the weather in the city that hosted the 2016 Summer Olympics? Use celsius."}],"model":"gpt-5.4-mini","reasoning_effort":"medium","stream":true,"stream_options":{"include_usage":true},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a given location","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location","unit"],"additionalProperties":false},"strict":true}}]}`,
 		},
 	},
 }

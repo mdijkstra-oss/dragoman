@@ -5,6 +5,10 @@ import (
 	"fmt"
 )
 
+// On Anthropic's reasoning models the cap covers thinking and output together,
+// so a small one truncates mid-thought.
+const DefaultMaxOutputTokens = 20000
+
 // Optional scalars are pointers because providers default differently, and
 // inventing a level nobody asked for changes both cost and behaviour.
 type Request struct {

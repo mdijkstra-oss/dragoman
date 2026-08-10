@@ -450,9 +450,11 @@ func cacheSent(t *testing.T, preset string, body []byte) ([]byte, []base.Drop) {
 
 // cacheRequest builds a Responses request carrying one user message whose
 // content is the parts given, plus whatever top-level fields the case names.
+// The cap is stated so the base dialect has nothing to fill in and forwards
+// the bytes untouched.
 func cacheRequest(parts, tail string) []byte {
 	return []byte(`{"model":"m","input":[{"type":"message","role":"user","content":` +
-		parts + `}]` + tail + `}`)
+		parts + `}],"max_output_tokens":20000` + tail + `}`)
 }
 
 // cacheParts builds a content array, one part per marker; an empty marker

@@ -80,8 +80,9 @@ func StatusOf(err error) int {
 	return 0
 }
 
-// Flag, then body, then nothing. Filling in a level nobody asked for overrides
-// a provider default and changes cost and behaviour.
+// Flag, then body. The output cap falls back to one default for every backend;
+// an effort nobody set stays absent, because filling one in overrides a
+// provider default and changes cost and behaviour.
 func Resolve(req base.Request, opts Options) base.Request {
 	if opts.Model != "" {
 		model := opts.Model
@@ -98,6 +99,10 @@ func Resolve(req base.Request, opts Options) base.Request {
 	}
 	if opts.MaxTokens != nil {
 		cap := *opts.MaxTokens
+		req.MaxOutputTokens = &cap
+	}
+	if req.MaxOutputTokens == nil {
+		cap := base.DefaultMaxOutputTokens
 		req.MaxOutputTokens = &cap
 	}
 	return req

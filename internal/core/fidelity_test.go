@@ -20,7 +20,7 @@ const oneUserTurn = `{"type":"message","role":"user","content":[{"type":"input_t
 // TestInputAcceptsTheStringForm covers the shortest valid Responses body. The
 // base is the same format as the wire, so both spellings of input arrive.
 func TestInputAcceptsTheStringForm(t *testing.T) {
-	body := []byte(`{"model":"m","input":"Say hi."}`)
+	body := []byte(`{"model":"m","input":"Say hi.","max_output_tokens":10}`)
 	result, err := core.Run(context.Background(), catalog.New(),
 		core.Options{Preset: "openai", NoExecute: true}, body, nil, nil)
 	if err != nil {

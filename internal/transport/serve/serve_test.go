@@ -265,6 +265,7 @@ func TestTheRewriteKeepsEverythingItDidNotName(t *testing.T) {
 	sent := []byte(`{"model":"openai/gpt-5.5",` +
 		`"input":[{"type":"message","role":"user","content":` +
 		`[{"type":"input_text","text":"if a < b && c > d then <b>bold</b>"}]}],` +
+		`"max_output_tokens":20000,` +
 		`"top_p":0.25,"unmodelled":{"nested":[1,{"deep":true},null]},"metadata":{"team":"acme & co"}}`)
 
 	call := core.Call{}
