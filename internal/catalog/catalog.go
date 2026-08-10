@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"maps"
 	"sort"
 
 	"github.com/mdijkstra-oss/dragoman/internal/base"
@@ -25,10 +26,24 @@ func Executors() core.Executors {
 	}
 }
 
-func Presets() map[string]base.Backend { return base.Must(Load(config.Default)) }
+func Presets() map[string]base.Backend {
+	return base.Must(config.Parse(config.Default, DialectNames())).Services
+}
 
+// A document adds to the built-in services unless it sets mode: override, and a
+// name defined in both is the document's — so an entry can point a shipped name
+// at another endpoint.
 func Load(document []byte) (map[string]base.Backend, error) {
-	return config.Parse(document, DialectNames())
+	parsed, err := config.Parse(document, DialectNames())
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Mode == config.ModeOverride {
+		return parsed.Services, nil
+	}
+	table := Presets()
+	maps.Copy(table, parsed.Services)
+	return table, nil
 }
 
 func Dialects() map[string]dialect.Dialect {

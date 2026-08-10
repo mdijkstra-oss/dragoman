@@ -30,10 +30,10 @@ FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /dragoman /dragoman
 
-# Nothing else is copied on purpose. No provider key, no service table, no
-# config file: credentials arrive as environment variables, and a table that is
-# not the embedded default is mounted read-only at run time, so the image is the
-# same bytes for every deployment.
+# Nothing else is copied on purpose. No provider key and no config file:
+# credentials arrive as environment variables, and services beyond the embedded
+# table are mounted read-only at run time, so the image is the same bytes for
+# every deployment.
 
 # Numeric, because scratch carries no /etc/passwd for a name to resolve against.
 # The process reads its configuration and writes its log, and needs no identity
