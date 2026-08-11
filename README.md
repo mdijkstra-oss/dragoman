@@ -181,4 +181,4 @@ AGPL-3.0. The full text is in [LICENSE](./LICENSE).
 
 ## See also
 
-- [chancery](https://github.com/mdijkstra-oss/chancery) — a directory of Markdown served as `openai-responses` endpoints. It reaches one backend, so putting dragoman behind it turns a prefixed model name in `models.yaml` into a choice of provider.
+- [chancery](https://github.com/mdijkstra-oss/chancery) — a directory of Markdown served as `openai-responses` endpoints. It reaches one backend, so putting dragoman behind it is what lets one instance span several providers.
