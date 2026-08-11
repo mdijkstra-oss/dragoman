@@ -6,12 +6,15 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -163,8 +166,40 @@ func serveCommand(cli ServeCmd) int {
 	// An answer may legitimately run long, and a deadline here would truncate a
 	// stream the caller is still reading.
 	server := &http.Server{Addr: cli.Addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	if err := server.ListenAndServe(); err != nil {
+	return listen(server, log)
+}
+
+// Docker stops a container by signalling it and killing it ten seconds later, so
+// the grace period has to end well inside that.
+const shutdownGrace = 5 * time.Second
+
+// Without this the Go runtime handles the signal itself and the process exits 2,
+// which reads as a crash. A stream still running at the deadline is cut: the
+// stop was asked for, and waiting for an answer that may run minutes only means
+// being killed later instead.
+func listen(server *http.Server, log *slog.Logger) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	failed := make(chan error, 1)
+	go func() { failed <- server.ListenAndServe() }()
+
+	select {
+	case err := <-failed:
 		return fail(err)
+	case <-ctx.Done():
+	}
+
+	log.Info("stopping", "grace", shutdownGrace.String())
+	grace, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+
+	if err := server.Shutdown(grace); err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return fail(err)
+		}
+		log.Warn("shutdown timed out; closing anyway", "after", shutdownGrace.String())
+		_ = server.Close()
 	}
 	return int(core.ExitOK)
 }

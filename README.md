@@ -114,6 +114,8 @@ data: {"type":"response.output_text.delta","sequence_number":7,"item_id":"msg_1"
 
 Over HTTP there is no `--backend`: the model names its service. The split is on the first slash only, so `openrouter/anthropic/claude-3` reaches `openrouter` and asks it for `anthropic/claude-3`.
 
+`SIGINT` or `SIGTERM` stops the listener and exits `0`, giving requests already in flight five seconds to finish. A stream still running at that point is cut.
+
 A provider's own status is passed through, so a rate limit keeps the retry semantics an SDK already implements; a provider error arriving inside a `200` becomes `502`.
 
 ## Runtime environment
