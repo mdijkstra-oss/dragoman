@@ -2,11 +2,7 @@
 
 > **dragoman** *(n.)* — an interpreter and guide, acting as both linguist and cultural mediator for travelers, merchants and diplomats.
 
-Translates between LLM protocols — one request format in, whichever protocol the provider speaks out, and the answer translated back.
-
-Requests and responses are [`openai-responses`](https://platform.openai.com/docs/api-reference/responses), buffered or streamed. Nothing is stored, credentials come from the environment, and one request never sees another.
-
-A backend is any endpoint speaking one of the four protocols below: a provider's own API, a router in front of several, or a local server.
+Translates between LLM protocols — Responses in, translated to the target provider, Responses out.
 
 ## Services
 
@@ -21,7 +17,7 @@ A service is a name, an endpoint, a protocol, and the environment variable holdi
 | `openrouter` | `openai-completions` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `openai-chat` | `openai-completions` | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 
-A service whose variable is unset is still served. It reports itself unavailable on `GET /services` and fails when it is called, so one missing key does not stop the rest.
+A service whose variable is unset is still served. It reports itself unavailable on `GET /services` and fails when it is called, so one missing key does not stop the rest. Your own config can override the default set.
 
 ### Adding your own
 
@@ -43,14 +39,12 @@ groq:
 | `max_output_tokens_as` | which field carries the output cap: `max_completion_tokens` or `max_tokens`. `openai-completions` only. |
 | `schema_as_prompt` | see below. `openai-completions` only. |
 
-`mode: override` makes the document the whole table and the built-in services go unserved. Under `append`, a name defined in both is the document's, so an entry can point a shipped name at another endpoint.
+`mode: override` disables the built in services. Under `append`, the built in services remain available.
 
 > [!IMPORTANT]
 > **`schema_as_prompt`.** Of the built-in services it applies to `deepseek` alone. [Its JSON mode](https://api-docs.deepseek.com/guides/json_mode) takes no schema and wants the shape described in the prompt, so an incoming `json_schema` is written into the instructions and sent with a `response_format` of `{"type": "json_object"}`. `text.format` is dropped on every such request.
 
-## Protocols
-
-Four wire formats, each named for what it is rather than who serves it:
+## Supported Protocols
 
 | protocol | path appended to the endpoint |
 |---|---|
@@ -59,13 +53,10 @@ Four wire formats, each named for what it is rather than who serves it:
 | `anthropic-messages` | `/messages` |
 | `gemini-interactions` | `/interactions` |
 
-The caller speaks `openai-responses` and nothing else. `--backend` names a service that has already picked a protocol; `--backend-protocol` with `--endpoint` and `--auth-env` reaches an endpoint that is in no table.
-
 ## Lossy translation
 
-Protocols do not always carry the same fields. A field that cannot be carried is dropped, and named by its path in the request the caller sent.
-
-Drops are silent by default. `--verbose` writes them to stderr, `serve` logs them at debug level, and `--strict` turns any drop into an error before the call goes out.
+Not all protocols carry the same field. A field that cannot be carried across is dropped and named by its path in the logs on `--verbose`.
+`--verbose` writes to stderr, `serve` logs them at debug level, and `--strict` turns any drop into an error before the call goes out.
 
 ## Quick start
 
@@ -75,7 +66,7 @@ Needs Go `1.25.1` and one provider key.
 $ go install github.com/mdijkstra-oss/dragoman/cmd/dragoman@latest
 ```
 
-`config` prints what this binary would serve, in the same YAML a document uses. Deleting a service from it and passing it back with `--config` leaves that service unserved.
+`config` prints what this binary would serve, in the same YAML a document uses.
 
 ```console
 $ dragoman config
@@ -97,7 +88,7 @@ elapsed 1.837s
 {"id":"msg_011Cduw...","object":"response","status":"completed","model":"claude-sonnet-5","output":[{"type":"message","id":"msg_0","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hello, hi there!"}]}],"usage":{"input_tokens":14,"output_tokens":10,"total_tokens":24}}
 ```
 
-`--stream` writes the event sequence instead, one JSON object per line. `--no-execute` prints the translated request and makes no call. `--raw` returns the backend's answer untranslated. `dragoman --help` carries the rest.
+`--stream` writes the event sequence instead, one JSON object per line. `--no-execute` prints the translated request and makes no call. `--raw` returns the backend's answer untranslated.
 
 The same translation is served over HTTP, where `stream` comes back as server-sent events:
 
@@ -118,12 +109,12 @@ data: {"type":"response.output_text.delta","sequence_number":7,"item_id":"msg_1"
 | route | body | response |
 |---|---|---|
 | `POST /responses` | an `openai-responses` request | an `openai-responses` response, or server-sent events when the body sets `stream` |
-| `GET /services` | — | every service, with whether its key is set |
-| `GET /health` | — | `{"status":"ok"}` |
+| `GET /services` | — | listing of available services |
+| `GET /health` | — | `{"status":"ok"}` when running |
 
 Over HTTP there is no `--backend`: the model names its service. The split is on the first slash only, so `openrouter/anthropic/claude-3` reaches `openrouter` and asks it for `anthropic/claude-3`.
 
-A failure comes back in the Responses error shape and says what would fix it. A provider's own status is passed through, so a rate limit keeps the retry semantics an SDK already implements; a provider error arriving inside a `200` becomes `502`.
+A provider's own status is passed through, so a rate limit keeps the retry semantics an SDK already implements; a provider error arriving inside a `200` becomes `502`.
 
 ## Runtime environment
 
