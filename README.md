@@ -122,6 +122,18 @@ Every service names the variable holding its key, and those names are the table'
 
 `LOG_REQUEST_HEADERS` names caller headers to put on every log line for the request — `X-` names only, at most 16, and a name reading as a credential is refused at boot.
 
+`TRANSLATE_ONLY` set to `1`, `true` or `yes` is `--no-execute` over HTTP: every answer is the body the backend would have received, and no call goes out. Nothing is spent and no key is needed, so an instance in this mode runs on a machine holding none — which is what it is for, and why it is off by default. The startup line says which it is.
+
+The mode is the instance, not the request. A listener either translates or serves, because one that did both would put a real call one forgotten parameter away.
+
+```console
+$ TRANSLATE_ONLY=1 dragoman serve --addr 127.0.0.1:8080
+
+$ curl -s -X POST http://127.0.0.1:8080/responses \
+    -d '{"model":"anthropic/claude-sonnet-5","input":"Say hello."}'
+{"model":"claude-sonnet-5","max_tokens":20000,"messages":[{"role":"user","content":[{"type":"text","text":"Say hello."}]}]}
+```
+
 Logs are JSON on stderr:
 
 ```json
@@ -144,12 +156,15 @@ make run PROMPT="Say hello."   # one request against the default model
 make run < request.json        # a whole request off stdin
 make serve                     # the built-in table over HTTP
 make serve-dev                 # the same, rebuilt and restarted on a change
+make bridge                    # anthropic-messages answered by the claude CLI
 go test ./...
 ```
 
 `MODEL`, `REASONING` and `ADDR` override the defaults, `ARGS` goes straight to dragoman, and `JQ=.` prints the whole response instead of a summary. Keys come from `.env.local`, which `.env.example` describes.
 
 The service table is embedded, so editing it is a source change and rebuilds the binary.
+
+`make bridge` starts [claude-bridge](cmd/claude-bridge/README.md), a development-only server that answers `anthropic-messages` requests through a signed-in Claude Code CLI instead of an API key. No tools, one turn per request; its README lists the limits.
 
 ## CLI
 

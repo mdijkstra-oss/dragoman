@@ -155,13 +155,17 @@ func serveCommand(cli ServeCmd) int {
 		return fail(err)
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel(cli.Verbose)}))
+	translateOnly := serve.TranslateOnly()
 	handler := serve.New(serve.Config{
-		Catalog:    known,
-		Strict:     cli.Strict,
-		Log:        log,
-		LogHeaders: logged,
+		Catalog:       known,
+		Strict:        cli.Strict,
+		Log:           log,
+		LogHeaders:    logged,
+		TranslateOnly: translateOnly,
 	})
-	log.Info("serving", "services", names(known), "addr", cli.Addr)
+	// An instance in this mode answers no request the way a caller expects, so
+	// an operator reading the log has to be able to see that it is on.
+	log.Info("serving", "services", names(known), "addr", cli.Addr, "translate_only", translateOnly)
 
 	// An answer may legitimately run long, and a deadline here would truncate a
 	// stream the caller is still reading.

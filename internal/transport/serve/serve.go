@@ -24,6 +24,9 @@ type Config struct {
 	Log *slog.Logger
 
 	LogHeaders []string
+
+	// Whether this instance stops short of the call. See TranslateOnlyVar.
+	TranslateOnly bool
 }
 
 type Service struct {
@@ -44,11 +47,12 @@ const StatusBackendRefused = http.StatusBadGateway
 
 func New(cfg Config) http.Handler {
 	listener := server{
-		catalog:  cfg.Catalog,
-		executor: cfg.Executor,
-		strict:   cfg.Strict,
-		log:      logger(cfg.Log),
-		headers:  cfg.LogHeaders,
+		catalog:       cfg.Catalog,
+		executor:      cfg.Executor,
+		strict:        cfg.Strict,
+		log:           logger(cfg.Log),
+		headers:       cfg.LogHeaders,
+		translateOnly: cfg.TranslateOnly,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/responses", listener.only(http.MethodPost, listener.translate))
@@ -59,11 +63,12 @@ func New(cfg Config) http.Handler {
 }
 
 type server struct {
-	catalog  core.Catalog
-	executor core.Executor
-	strict   bool
-	log      *slog.Logger
-	headers  []string
+	catalog       core.Catalog
+	executor      core.Executor
+	strict        bool
+	log           *slog.Logger
+	headers       []string
+	translateOnly bool
 }
 
 func (s server) translate(w http.ResponseWriter, r *http.Request) {
@@ -87,14 +92,20 @@ func (s server) translate(w http.ResponseWriter, r *http.Request) {
 			named, strings.Join(serviceNames(s.catalog.Presets), ", ")))
 		return
 	}
-	if !hasCredential(backend) {
+	// Translating reaches no provider, so it needs no key. Demanding one would
+	// put the translation out of reach on exactly the machine that holds none.
+	if !s.translateOnly && !hasCredential(backend) {
 		s.fail(w, r, http.StatusInternalServerError,
 			fmt.Sprintf("service %q is unavailable: %s is not set", service, backend.KeyEnv))
 		return
 	}
 
-	opts := core.Options{Preset: service, Model: model, Strict: s.strict}
+	opts := core.Options{Preset: service, Model: model, Strict: s.strict, NoExecute: s.translateOnly}
 	clearWriteDeadline(w)
+	if s.translateOnly {
+		s.translated(w, r, opts, body)
+		return
+	}
 	if core.WantsEvents(req, opts) {
 		s.streamed(w, r, opts, body)
 		return
@@ -118,6 +129,22 @@ func (s server) buffered(w http.ResponseWriter, r *http.Request, opts core.Optio
 	}
 	writeJSON(w, http.StatusOK, encoded)
 	s.served(r, opts, http.StatusOK, elapsed, result.Usage)
+}
+
+// translated answers with the body the backend would have received. NoExecute
+// returns before the credential is read, so this cannot reach a provider and
+// cannot spend anything. It is what --no-execute writes to stdout, over HTTP.
+func (s server) translated(w http.ResponseWriter, r *http.Request, opts core.Options, body []byte) {
+	started := time.Now()
+	result, err := core.Run(r.Context(), s.catalog, opts, body, s.executor, nil)
+	elapsed := time.Since(started)
+	s.record(opts.Preset, result.Drops)
+	if err != nil {
+		s.fail(w, r, statusOf(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result.Sent)
+	s.served(r, opts, http.StatusOK, elapsed, nil)
 }
 
 func (s server) streamed(w http.ResponseWriter, r *http.Request, opts core.Options, body []byte) {

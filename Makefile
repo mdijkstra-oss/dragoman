@@ -3,6 +3,7 @@
 # make run < request.json          no PROMPT: a whole request off stdin
 # make serve [ADDR=]               the built-in table over HTTP
 # make serve-dev [ADDR=]           the same, rebuilt and restarted on a change
+# make bridge [BRIDGE_ADDR=]       anthropic-messages answered by the claude CLI
 # Keys come from .env.local. ARGS goes straight to dragoman (--stream, --raw,
 # --no-execute, -v ...). JQ=. prints the whole response.
 
@@ -17,12 +18,14 @@ JQ ?= {status, model, text: ([.output[] | select(.type=="message") | .content[].
 ADDR ?= 127.0.0.1:8080
 
 BIN := bin/dragoman
+BRIDGE := bin/claude-bridge
+BRIDGE_ADDR ?= 127.0.0.1:8082
 # The service table is embedded, so a table edit is a source change like any
 # other and has to rebuild the binary.
 SOURCES := $(shell find cmd internal \( -name '*.go' -o -name '*.yaml' \) 2>/dev/null)
 export PROMPT MODEL REASONING
 
-.PHONY: run serve serve-dev
+.PHONY: run serve serve-dev bridge
 
 $(BIN): $(SOURCES)
 	@go build -o $(BIN) ./cmd/dragoman
@@ -55,3 +58,11 @@ serve-dev:
 	  echo "serve-dev needs watchexec: brew install watchexec" >&2; exit 1; }
 	@exec watchexec --restart --exts go,yaml --watch cmd --watch internal \
 	  -- 'go build -o $(BIN) ./cmd/dragoman && { $(SERVE); }'
+
+# No .env.local here: the bridge strips every ANTHROPIC_* variable from the CLI
+# it spawns, and loading keys it would only throw away invites confusion.
+$(BRIDGE): $(SOURCES)
+	@go build -o $(BRIDGE) ./cmd/claude-bridge
+
+bridge: $(BRIDGE)
+	@exec $(BRIDGE) --addr $(BRIDGE_ADDR) $(ARGS)
