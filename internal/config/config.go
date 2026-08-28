@@ -87,11 +87,12 @@ func modeOf(entries map[string]yaml.Node) (Mode, error) {
 }
 
 type service struct {
-	Endpoint          string `yaml:"endpoint"`
-	Protocol          string `yaml:"protocol"`
-	Auth              string `yaml:"auth"`
-	SchemaAsPrompt    bool   `yaml:"schema_as_prompt,omitempty"`
-	MaxOutputTokensAs string `yaml:"max_output_tokens_as,omitempty"`
+	Endpoint                   string `yaml:"endpoint"`
+	Protocol                   string `yaml:"protocol"`
+	Auth                       string `yaml:"auth"`
+	SchemaAsPrompt             bool   `yaml:"schema_as_prompt,omitempty"`
+	MaxOutputTokensAs          string `yaml:"max_output_tokens_as,omitempty"`
+	OmitDefaultMaxOutputTokens bool   `yaml:"omit_default_max_output_tokens,omitempty"`
 }
 
 // Format writes a table back as the document that would produce it, so what an
@@ -126,11 +127,12 @@ func Format(table map[string]base.Backend) ([]byte, error) {
 
 func written(backend base.Backend) service {
 	return service{
-		Endpoint:          backend.Endpoint,
-		Protocol:          backend.Dialect,
-		Auth:              backend.KeyEnv,
-		SchemaAsPrompt:    backend.SchemaAsPrompt,
-		MaxOutputTokensAs: backend.MaxOutputTokensAs,
+		Endpoint:                   backend.Endpoint,
+		Protocol:                   backend.Dialect,
+		Auth:                       backend.KeyEnv,
+		SchemaAsPrompt:             backend.SchemaAsPrompt,
+		MaxOutputTokensAs:          backend.MaxOutputTokensAs,
+		OmitDefaultMaxOutputTokens: backend.OmitDefaultMaxOutputTokens,
 	}
 }
 
@@ -170,13 +172,18 @@ func resolve(name string, entry service, known map[string]bool, protocols []stri
 				name, entry.MaxOutputTokensAs, strings.Join(capFields, ", "))
 		}
 	}
+	if entry.OmitDefaultMaxOutputTokens && entry.Protocol != "openai-responses" {
+		return base.Backend{}, fmt.Errorf("config: service %q sets omit_default_max_output_tokens on protocol %q (only openai-responses can omit Dragoman's synthesized default)",
+			name, entry.Protocol)
+	}
 	return base.Backend{
-		Name:              name,
-		Dialect:           entry.Protocol,
-		Endpoint:          entry.Endpoint,
-		KeyEnv:            entry.Auth,
-		SchemaAsPrompt:    entry.SchemaAsPrompt,
-		MaxOutputTokensAs: entry.MaxOutputTokensAs,
+		Name:                       name,
+		Dialect:                    entry.Protocol,
+		Endpoint:                   entry.Endpoint,
+		KeyEnv:                     entry.Auth,
+		SchemaAsPrompt:             entry.SchemaAsPrompt,
+		MaxOutputTokensAs:          entry.MaxOutputTokensAs,
+		OmitDefaultMaxOutputTokens: entry.OmitDefaultMaxOutputTokens,
 	}, nil
 }
 

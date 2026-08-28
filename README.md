@@ -38,6 +38,7 @@ groq:
 | `auth` | the name of the variable holding the key, never the key. Required. |
 | `max_output_tokens_as` | which field carries the output cap: `max_completion_tokens` or `max_tokens`. `openai-completions` only. |
 | `schema_as_prompt` | see below. `openai-completions` only. |
+| `omit_default_max_output_tokens` | omit Dragoman's synthesized 20,000-token cap while preserving caller-supplied caps. `openai-responses` only, for wrappers without cap control. |
 
 `mode: override` disables the built in services. Under `append`, the built in services remain available.
 
@@ -157,6 +158,7 @@ make run < request.json        # a whole request off stdin
 make serve                     # the built-in table over HTTP
 make serve-dev                 # the same, rebuilt and restarted on a change
 make bridge                    # anthropic-messages answered by the claude CLI
+make codex-bridge              # Responses answered by the codex CLI
 go test ./...
 ```
 
@@ -165,6 +167,8 @@ go test ./...
 The service table is embedded, so editing it is a source change and rebuilds the binary.
 
 `make bridge` starts [claude-bridge](cmd/claude-bridge/README.md), a development-only server that answers `anthropic-messages` requests through a signed-in Claude Code CLI instead of an API key. No tools, one turn per request; its README lists the limits.
+
+`make codex-bridge` starts [codex-bridge](cmd/codex-bridge/README.md), a development-only Responses server that runs one isolated, tool-disabled Codex CLI turn against the signed-in ChatGPT account. It buffers each CLI result; `stream: true` receives valid but delayed SSE with one text delta.
 
 ## CLI
 

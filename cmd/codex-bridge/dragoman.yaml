@@ -1,0 +1,6 @@
+mode: append
+codex:
+  endpoint: http://127.0.0.1:8083/v1
+  protocol: openai-responses
+  auth: CODEX_BRIDGE_KEY
+  omit_default_max_output_tokens: true

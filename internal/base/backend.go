@@ -23,4 +23,9 @@ type Backend struct {
 	// Which field carries the output cap, where an endpoint does not take the
 	// default. Empty is the default spelling.
 	MaxOutputTokensAs string
+
+	// Some local wrappers have no output-cap control. They may omit only the
+	// default Dragoman synthesized; a cap the caller supplied still travels and
+	// lets that wrapper refuse it explicitly.
+	OmitDefaultMaxOutputTokens bool
 }

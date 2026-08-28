@@ -4,6 +4,7 @@
 # make serve [ADDR=]               the built-in table over HTTP
 # make serve-dev [ADDR=]           the same, rebuilt and restarted on a change
 # make bridge [BRIDGE_ADDR=]       anthropic-messages answered by the claude CLI
+# make codex-bridge                Responses answered by the codex CLI
 # Keys come from .env.local. ARGS goes straight to dragoman (--stream, --raw,
 # --no-execute, -v ...). JQ=. prints the whole response.
 
@@ -20,12 +21,14 @@ ADDR ?= 127.0.0.1:8080
 BIN := bin/dragoman
 BRIDGE := bin/claude-bridge
 BRIDGE_ADDR ?= 127.0.0.1:8082
+CODEX_BRIDGE := bin/codex-bridge
+CODEX_BRIDGE_ADDR ?= 127.0.0.1:8083
 # The service table is embedded, so a table edit is a source change like any
 # other and has to rebuild the binary.
 SOURCES := $(shell find cmd internal \( -name '*.go' -o -name '*.yaml' \) 2>/dev/null)
 export PROMPT MODEL REASONING
 
-.PHONY: run serve serve-dev bridge
+.PHONY: run serve serve-dev bridge codex-bridge
 
 $(BIN): $(SOURCES)
 	@go build -o $(BIN) ./cmd/dragoman
@@ -66,3 +69,11 @@ $(BRIDGE): $(SOURCES)
 
 bridge: $(BRIDGE)
 	@exec $(BRIDGE) --addr $(BRIDGE_ADDR) $(ARGS)
+
+# This bridge authenticates with the Codex CLI's stored ChatGPT login. It does
+# not load .env.local, and strips API credentials from every child invocation.
+$(CODEX_BRIDGE): $(SOURCES)
+	@go build -o $(CODEX_BRIDGE) ./cmd/codex-bridge
+
+codex-bridge: $(CODEX_BRIDGE)
+	@exec $(CODEX_BRIDGE) --addr $(CODEX_BRIDGE_ADDR) $(ARGS)

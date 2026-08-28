@@ -6,3 +6,4 @@ bin/
 .idea/
 .claude/
 /claude-bridge
+/codex-bridge

@@ -205,6 +205,41 @@ func TestOutputCapPrecedence(t *testing.T) {
 	}
 }
 
+// TestResponsesWrapperOmitsOnlyTheSynthesizedCap covers wrappers such as
+// codex-bridge that cannot control their output cap. The service quirk removes
+// Dragoman's fallback without weakening the bridge's refusal of caller limits.
+func TestResponsesWrapperOmitsOnlyTheSynthesizedCap(t *testing.T) {
+	table := catalog.New()
+	table.Presets["wrapper"] = base.Backend{
+		Name: "wrapper", Dialect: "openai-responses", Endpoint: "http://127.0.0.1:1/v1",
+		KeyEnv: "WRAPPER_KEY", OmitDefaultMaxOutputTokens: true,
+	}
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "absent stays absent", body: `{"model":"m","input":"hi"}`, want: ""},
+		{name: "caller cap remains", body: `{"model":"m","input":"hi","max_output_tokens":512}`, want: "512"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, err := core.Run(context.Background(), table,
+				core.Options{Preset: "wrapper", NoExecute: true}, []byte(testCase.body), nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sent map[string]any
+			if err := json.Unmarshal(result.Sent, &sent); err != nil {
+				t.Fatal(err)
+			}
+			if got := lookup(sent, "max_output_tokens"); got != testCase.want {
+				t.Fatalf("max_output_tokens = %q, want %q; body: %s", got, testCase.want, result.Sent)
+			}
+		})
+	}
+}
+
 // TestStrictRefusesToSendOnADrop covers the mode where silence is not an
 // option: a dropped field produces a confident, well-formed, wrong answer.
 func TestStrictRefusesToSendOnADrop(t *testing.T) {
@@ -398,12 +433,12 @@ func TestPresetsAreExpressibleInFlags(t *testing.T) {
 	body := weatherRequest(t)
 	for _, preset := range catalog.PresetNames() {
 		backend := catalog.Presets()[preset]
-		// The two quirk keys are capabilities of an endpoint, and the only
+		// The quirk keys are capabilities of an endpoint, and the only
 		// entries in the table that no flag restates. Everything else —
 		// including the credential's variable and the upstream streaming
 		// decision, which the protocol owns — must be reachable from the
 		// command line unchanged.
-		if backend.SchemaAsPrompt || backend.MaxOutputTokensAs != "" {
+		if backend.SchemaAsPrompt || backend.MaxOutputTokensAs != "" || backend.OmitDefaultMaxOutputTokens {
 			continue
 		}
 		t.Run(preset, func(t *testing.T) {

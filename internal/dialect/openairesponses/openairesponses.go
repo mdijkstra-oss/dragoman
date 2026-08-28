@@ -45,7 +45,11 @@ func encode(req base.Request, backend base.Backend, stream bool) (dialect.Encode
 		changes["reasoning"] = req.Reasoning
 	}
 	if cap := req.MaxOutputTokens; cap != nil && base.Differs(req.Raw, "max_output_tokens", *cap) {
-		changes["max_output_tokens"] = *cap
+		callerSuppliedCap := base.Differs(req.Raw, "max_output_tokens", nil)
+		omitSynthesizedDefault := backend.OmitDefaultMaxOutputTokens && !callerSuppliedCap && *cap == base.DefaultMaxOutputTokens
+		if !omitSynthesizedDefault {
+			changes["max_output_tokens"] = *cap
+		}
 	}
 	body, err := base.Patch(req.Raw, changes)
 	if err != nil {

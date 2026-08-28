@@ -98,6 +98,28 @@ groq:
 	}
 }
 
+func TestOmitDefaultMaxOutputTokensIsResponsesOnly(t *testing.T) {
+	responses := []byte(`
+codex:
+  endpoint: http://127.0.0.1:8083/v1
+  protocol: openai-responses
+  auth: CODEX_BRIDGE_KEY
+  omit_default_max_output_tokens: true
+`)
+	parsed, err := config.Parse(responses, protocols)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !parsed.Services["codex"].OmitDefaultMaxOutputTokens {
+		t.Fatal("omit_default_max_output_tokens was not carried to the backend")
+	}
+
+	notResponses := strings.Replace(string(responses), "openai-responses", "anthropic-messages", 1)
+	if _, err := config.Parse([]byte(notResponses), protocols); err == nil || !strings.Contains(err.Error(), "omit_default_max_output_tokens") {
+		t.Fatalf("non-Responses error = %v", err)
+	}
+}
+
 // TestModeIsReadFromTheDocument covers the choice between adding to the built-in
 // services and standing for all of them, which is the document's to make.
 func TestModeIsReadFromTheDocument(t *testing.T) {
