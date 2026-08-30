@@ -34,7 +34,10 @@ var disabledFeatures = []string{
 }
 
 type Runner struct {
-	Path    string
+	Path string
+	// Codex's own web search runs inside the CLI and comes back as text.
+	// Off by default; on, the standalone search tool stays enabled too.
+	Web     bool
 	workDir string
 	env     []string
 	skills  []skillConfig
@@ -226,9 +229,14 @@ func (r *Runner) args(call Invocation, schemaPath string) []string {
 		"-c", "developer_instructions=" + tomlString(call.Instructions),
 		"-c", `personality="none"`, "-c", "include_permissions_instructions=false",
 		"-c", "include_apps_instructions=false", "-c", "include_collaboration_mode_instructions=false",
-		"-c", "include_environment_context=false", "-c", `web_search="disabled"`,
-		"-c", "tools.web_search=false", "-c", `tools.experimental_request_user_input={enabled=false}`,
+		"-c", "include_environment_context=false",
+		"-c", `tools.experimental_request_user_input={enabled=false}`,
 		"-c", `tools.update_plan={enabled=false}`,
+	}
+	if r.Web {
+		args = append(args, "-c", `web_search="live"`, "-c", "tools.web_search=true")
+	} else {
+		args = append(args, "-c", `web_search="disabled"`, "-c", "tools.web_search=false")
 	}
 	if len(r.skills) > 0 {
 		var config strings.Builder
@@ -247,6 +255,9 @@ func (r *Runner) args(call Invocation, schemaPath string) []string {
 		args = append(args, "-c", config.String())
 	}
 	for _, feature := range disabledFeatures {
+		if r.Web && feature == "standalone_web_search" {
+			continue
+		}
 		args = append(args, "--disable", feature)
 	}
 	if call.Model != "" {

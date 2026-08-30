@@ -22,6 +22,7 @@ type CLI struct {
 	Addr    string `help:"Address to listen on." default:"127.0.0.1:8082"`
 	Binary  string `help:"The claude executable, a name on PATH or a path." default:"claude"`
 	Verbose bool   `help:"Log every frame the CLI emits." short:"v"`
+	Web     bool   `help:"Let the CLI use its own web search and fetch."`
 }
 
 func main() {
@@ -52,6 +53,7 @@ func run() int {
 		return 2
 	}
 	defer runner.Close()
+	runner.Web = cli.Web
 
 	server := &http.Server{
 		Addr:              cli.Addr,
@@ -65,7 +67,7 @@ func run() int {
 		_ = server.Shutdown(shutdown)
 	}()
 
-	log.Info("serving", "addr", cli.Addr, "binary", runner.Path, "account", runner.Account)
+	log.Info("serving", "addr", cli.Addr, "binary", runner.Path, "account", runner.Account, "web", cli.Web)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintln(os.Stderr, "claude-bridge:", err)
 		return 2

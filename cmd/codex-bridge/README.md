@@ -39,6 +39,7 @@ $ make codex-bridge
 | `--addr` | `127.0.0.1:8083` | Address to listen on. |
 | `--binary` | `codex` | Codex executable name or path. |
 | `-v`, `--verbose` | off | Log each Codex JSONL frame type. |
+| `--web` | off | Let Codex use its own web search. It runs inside the CLI and comes back as text; the caller still sees no tool calls. |
 
 `GET /health` returns `{"ok":true,"account":"ChatGPT"}`. The server has no client authentication and is designed for loopback use only. Do not expose it on a network.
 

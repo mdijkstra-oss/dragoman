@@ -31,6 +31,7 @@ On start it logs the listen address, the resolved binary path, and the signed-in
 | `--addr` | `127.0.0.1:8082` | Address to listen on. |
 | `--binary` | `claude` | The claude executable: a name on `PATH` or a path. |
 | `-v`, `--verbose` | off | Log every frame the CLI emits. |
+| `--web` | off | Let the CLI use its own `WebSearch` and `WebFetch`. They run inside the CLI and come back as text, so the caller still sees no tool calls; the prompt grows and the model decides when to look something up. |
 
 `GET /health` returns `{"ok":true,"account":"..."}`.
 
@@ -66,7 +67,7 @@ $ echo '{"input":"Say hello."}' | dragoman --config bridge.yaml --backend anthro
 
 The CLI prefers an API key in its environment over its sign-in. claude-bridge strips every `ANTHROPIC_*` variable, plus `CLAUDE_CODE_USE_BEDROCK` and `CLAUDE_CODE_USE_VERTEX`, from the child's environment before it runs, so a key inherited from a shell profile, a `.env` file or a compose file cannot silently move the call — and the bill — to another account. `CLAUDE_CONFIG_DIR` is kept, because it says where the sign-in lives.
 
-Each call runs from an empty temporary directory with `--safe-mode`, `--tools ""`, `--strict-mcp-config`, `--no-session-persistence` and `--exclude-dynamic-system-prompt-sections`, so no CLAUDE.md, settings, hooks, skills or MCP servers from the working tree reach the model.
+Each call runs from an empty temporary directory with `--safe-mode`, `--tools ""` (or `--tools WebSearch,WebFetch --allowedTools WebSearch,WebFetch` under `--web`), `--strict-mcp-config`, `--no-session-persistence` and `--exclude-dynamic-system-prompt-sections`, so no CLAUDE.md, settings, hooks, skills or MCP servers from the working tree reach the model.
 
 ## How a request travels
 

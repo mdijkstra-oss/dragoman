@@ -20,6 +20,7 @@ type CLI struct {
 	Addr    string `help:"Address to listen on." default:"127.0.0.1:8083"`
 	Binary  string `help:"The codex executable, a name on PATH or a path." default:"codex"`
 	Verbose bool   `help:"Log every frame the CLI emits." short:"v"`
+	Web     bool   `help:"Let Codex use its own web search."`
 }
 
 func main() { os.Exit(run()) }
@@ -46,6 +47,7 @@ func run() int {
 		return 2
 	}
 	defer runner.Close()
+	runner.Web = cli.Web
 
 	server := &http.Server{
 		Addr:              cli.Addr,
@@ -59,7 +61,7 @@ func run() int {
 		_ = server.Shutdown(shutdown)
 	}()
 
-	log.Info("serving", "addr", cli.Addr, "binary", runner.Path, "account", "ChatGPT")
+	log.Info("serving", "addr", cli.Addr, "binary", runner.Path, "account", "ChatGPT", "web", cli.Web)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintln(os.Stderr, "codex-bridge:", err)
 		return 2

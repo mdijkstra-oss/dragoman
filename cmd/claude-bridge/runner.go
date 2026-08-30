@@ -28,16 +28,21 @@ var fixedArgs = []string{
 	"--verbose",
 	"--include-partial-messages",
 	"--safe-mode",
-	"--tools", "",
 	"--disable-slash-commands",
 	"--strict-mcp-config",
 	"--no-session-persistence",
 	"--exclude-dynamic-system-prompt-sections",
 }
 
+// The CLI's own web search and fetch run inside the CLI and come back as
+// text, so they need no channel to the caller. Off by default: they add to
+// the prompt and the model decides on its own when to use them.
+const webTools = "WebSearch,WebFetch"
+
 type Runner struct {
 	Path    string
 	Account string
+	Web     bool
 	// The CLI reads CLAUDE.md, settings and skills from the directory it runs
 	// in, so every call runs from a directory holding nothing.
 	workDir string
@@ -62,6 +67,16 @@ func NewRunner(ctx context.Context, binary string) (*Runner, error) {
 }
 
 func (r *Runner) Close() { _ = os.RemoveAll(r.workDir) }
+
+// With nobody at a prompt to grant permission, a tool the CLI would ask
+// about is a tool it refuses; naming them as allowed settles that up front.
+func (r *Runner) args() []string {
+	args := append(append([]string{}, fixedArgs...), "--tools", "")
+	if r.Web {
+		args = append(args, "--tools", webTools, "--allowedTools", webTools)
+	}
+	return args
+}
 
 // Reading the status costs no tokens and makes no model call. Run with the
 // same environment the calls run in, or this describes another account.
@@ -130,7 +145,7 @@ type frame struct {
 // onEvent, in order. The returned error describes a failure of the bridge or of
 // the CLI; a model-side refusal is reported through the outcome instead.
 func (r *Runner) Run(ctx context.Context, call Invocation, onEvent func(json.RawMessage) error) (Outcome, error) {
-	argv := append([]string{}, fixedArgs...)
+	argv := r.args()
 	// Omitting this flag leaves Claude Code's own agent prompt in place, so it
 	// is always passed, empty when the caller sent no instructions.
 	argv = append(argv, "--system-prompt", call.System)

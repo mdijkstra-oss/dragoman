@@ -170,6 +170,9 @@ func TestRunnerArgumentsAreIsolated(t *testing.T) {
 			t.Errorf("arguments do not contain %q:\n%s", required, args)
 		}
 	}
+	if strings.Contains(args, "standalone_web_search") == false || !strings.Contains(args, `web_search="disabled"`) {
+		t.Errorf("web search is not disabled by default:\n%s", args)
+	}
 	if stdin := readSingleRecord(t, records, "stdin."); stdin != "hello" {
 		t.Fatalf("stdin = %q", stdin)
 	}
@@ -231,5 +234,25 @@ func TestConcurrentRequestsRemainIndependent(t *testing.T) {
 	close(errors)
 	for err := range errors {
 		t.Error(err)
+	}
+}
+
+func TestWebFlagLeavesCodexSearchOn(t *testing.T) {
+	runner, records := fakeRunner(t)
+	defer runner.Close()
+	runner.Web = true
+	if _, err := runner.Run(context.Background(), Invocation{Model: "gpt-5.4", Prompt: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	args := readSingleRecord(t, records, "args.")
+	for _, required := range []string{`web_search="live"`, "tools.web_search=true"} {
+		if !strings.Contains(args, required) {
+			t.Errorf("arguments do not contain %q:\n%s", required, args)
+		}
+	}
+	for _, forbidden := range []string{"standalone_web_search", `web_search="disabled"`} {
+		if strings.Contains(args, forbidden) {
+			t.Errorf("arguments still contain %q:\n%s", forbidden, args)
+		}
 	}
 }
