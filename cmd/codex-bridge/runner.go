@@ -24,6 +24,11 @@ import (
 const supportedVersion = "codex-cli 0.149.1"
 const killedChildPipeGrace = 5 * time.Second
 
+var supportedVersions = map[string]bool{
+	"codex-cli 0.149.1": true,
+	"codex-cli 0.154.0": true,
+}
+
 var disabledFeatures = []string{
 	"apps", "artifact", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
 	"code_mode", "computer_use", "default_mode_request_user_input", "enable_mcp_apps", "goals",
@@ -101,8 +106,12 @@ func checkVersion(ctx context.Context, path string, env []string) error {
 		return fmt.Errorf("checking %s version: %w", path, err)
 	}
 	got := strings.TrimSpace(string(output))
-	if got != supportedVersion {
-		return fmt.Errorf("unsupported Codex CLI version %q; codex-bridge requires %s", got, supportedVersion)
+	if !supportedVersions[got] {
+		return fmt.Errorf(
+			"unsupported Codex CLI version %q; codex-bridge requires a supported version (%s or codex-cli 0.154.0)",
+			got,
+			supportedVersion,
+		)
 	}
 	return nil
 }

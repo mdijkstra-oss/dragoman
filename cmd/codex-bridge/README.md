@@ -11,7 +11,7 @@ The bridge accepts `POST /responses` and `POST /v1/responses`, buffered or with 
 
 - a required `model`;
 - optional `instructions` and `reasoning.effort`;
-- exactly one user text input, as a string or one user message;
+- exactly one user text input, plus any number of system/developer text messages;
 - text output or a JSON Schema in `text.format`;
 - `store` absent or `false`, plus empty or null inert fields such as `tools: []`.
 
@@ -23,7 +23,7 @@ Every request is independent. There are no persistent sessions, injected thread 
 
 ## Run
 
-The bridge is pinned to `codex-cli 0.149.1`. Install that version, authenticate through ChatGPT, and start it:
+The bridge supports `codex-cli 0.149.1` and `0.154.0`. Authenticate through ChatGPT, then start it:
 
 ```console
 $ codex login

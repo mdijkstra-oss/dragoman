@@ -84,9 +84,12 @@ func parseInvocation(body []byte) (Invocation, bool, error) {
 		}
 	}
 
-	prompt, err := oneUserText(req.Input)
+	context, prompt, err := contextAndPrompt(req.Input)
 	if err != nil {
 		return Invocation{}, false, err
+	}
+	if context != "" {
+		call.Instructions += "\n\n" + context
 	}
 	call.Prompt = prompt
 	return call, base.GetStream(req), nil
@@ -98,19 +101,35 @@ var supportedTopLevel = map[string]bool{
 	"tool_choice": true, "max_output_tokens": true,
 }
 
-func oneUserText(input base.Input) (string, error) {
-	if len(input) != 1 {
-		return "", fmt.Errorf("codex-bridge: input must contain exactly one user text message")
+func contextAndPrompt(input base.Input) (string, string, error) {
+	context := []string{}
+	userText := ""
+	seenUser := false
+	for _, item := range input {
+		if item.Type != base.ItemMessage || len(item.Content) != 1 {
+			return "", "", fmt.Errorf("codex-bridge: input must contain text messages")
+		}
+		part := item.Content[0]
+		if part.Type != base.PartInputText {
+			return "", "", fmt.Errorf("codex-bridge: input must contain only text")
+		}
+		switch item.Role {
+		case base.RoleSystem, base.RoleDeveloper:
+			context = append(context, part.Text)
+		case base.RoleUser:
+			if seenUser {
+				return "", "", fmt.Errorf("codex-bridge: input must contain exactly one user text message")
+			}
+			seenUser = true
+			userText = part.Text
+		default:
+			return "", "", fmt.Errorf("codex-bridge: input supports only system, developer, and user messages")
+		}
 	}
-	item := input[0]
-	if item.Type != base.ItemMessage || item.Role != base.RoleUser || len(item.Content) != 1 {
-		return "", fmt.Errorf("codex-bridge: input must be exactly one user text message")
+	if !seenUser {
+		return "", "", fmt.Errorf("codex-bridge: input must contain exactly one user text message")
 	}
-	part := item.Content[0]
-	if part.Type != base.PartInputText || !inert(part.PromptCacheBreakpoint) {
-		return "", fmt.Errorf("codex-bridge: images, cache markers, and non-text input are not supported")
-	}
-	return part.Text, nil
+	return strings.Join(context, "\n\n"), userText, nil
 }
 
 func validateInputShape(raw json.RawMessage) error {
@@ -119,29 +138,35 @@ func validateInputShape(raw json.RawMessage) error {
 		return nil
 	}
 	var items []json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil || len(items) != 1 {
-		return fmt.Errorf("codex-bridge: input must be a string or exactly one user text message")
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return fmt.Errorf("codex-bridge: input must be a string or an array of text messages")
 	}
-	var item map[string]json.RawMessage
-	if err := json.Unmarshal(items[0], &item); err != nil {
-		return fmt.Errorf("codex-bridge: input message must be an object")
+	for index, rawItem := range items {
+		var item map[string]json.RawMessage
+		if err := json.Unmarshal(rawItem, &item); err != nil {
+			return fmt.Errorf("codex-bridge: input message must be an object")
+		}
+		path := fmt.Sprintf("input[%d]", index)
+		if err := rejectUnknown(item, path, "type", "role", "content"); err != nil {
+			return err
+		}
+		content := item["content"]
+		if json.Unmarshal(content, &prompt) == nil {
+			continue
+		}
+		var parts []json.RawMessage
+		if err := json.Unmarshal(content, &parts); err != nil || len(parts) != 1 {
+			return fmt.Errorf("codex-bridge: input message must contain exactly one text part")
+		}
+		var part map[string]json.RawMessage
+		if err := json.Unmarshal(parts[0], &part); err != nil {
+			return fmt.Errorf("codex-bridge: input content must be an object")
+		}
+		if err := rejectUnknown(part, path+".content[0]", "type", "text", "prompt_cache_breakpoint"); err != nil {
+			return err
+		}
 	}
-	if err := rejectUnknown(item, "input[0]", "type", "role", "content"); err != nil {
-		return err
-	}
-	content := item["content"]
-	if json.Unmarshal(content, &prompt) == nil {
-		return nil
-	}
-	var parts []json.RawMessage
-	if err := json.Unmarshal(content, &parts); err != nil || len(parts) != 1 {
-		return fmt.Errorf("codex-bridge: input message must contain exactly one text part")
-	}
-	var part map[string]json.RawMessage
-	if err := json.Unmarshal(parts[0], &part); err != nil {
-		return fmt.Errorf("codex-bridge: input content must be an object")
-	}
-	return rejectUnknown(part, "input[0].content[0]", "type", "text", "prompt_cache_breakpoint")
+	return nil
 }
 
 func rejectUnknown(object map[string]json.RawMessage, path string, allowed ...string) error {

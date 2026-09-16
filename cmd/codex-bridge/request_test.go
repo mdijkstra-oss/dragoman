@@ -15,8 +15,8 @@ func TestParseInvocation(t *testing.T) {
 		{name: "string", body: `{"model":"gpt-5.4","input":"hello"}`, wantPrompt: "hello"},
 		{name: "message", body: `{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`, wantPrompt: "hello"},
 		{name: "empty inert fields", body: `{"model":"gpt-5.4","input":"hello","tools":[],"store":false,"metadata":{},"include":null}`, wantPrompt: "hello"},
-		{name: "history", body: `{"model":"gpt-5.4","input":[{"role":"user","content":"one"},{"role":"assistant","content":"two"}]}`, wantError: "exactly one"},
-		{name: "assistant", body: `{"model":"gpt-5.4","input":[{"role":"assistant","content":"hello"}]}`, wantError: "one user"},
+		{name: "history", body: `{"model":"gpt-5.4","input":[{"role":"user","content":"one"},{"role":"assistant","content":"two"}]}`, wantError: "only system"},
+		{name: "assistant", body: `{"model":"gpt-5.4","input":[{"role":"assistant","content":"hello"}]}`, wantError: "only system"},
 		{name: "image", body: `{"model":"gpt-5.4","input":[{"role":"user","content":[{"type":"input_image","image_url":"x"}]}]}`, wantError: "image_url"},
 		{name: "message metadata", body: `{"model":"gpt-5.4","input":[{"role":"user","content":"hello","id":"msg_1"}]}`, wantError: "input[0].id"},
 		{name: "part metadata", body: `{"model":"gpt-5.4","input":[{"role":"user","content":[{"type":"input_text","text":"hello","future":1}]}]}`, wantError: "content[0].future"},
@@ -68,5 +68,13 @@ func TestInvocationMappings(t *testing.T) {
 	}
 	if plain.Instructions != defaultInstructions || len(plain.Schema) != 0 {
 		t.Fatalf("plain mapping: %+v", plain)
+	}
+
+	contextual, _, err := parseInvocation([]byte(`{"model":"gpt-5.4","instructions":"gateway rules","input":[{"type":"message","role":"system","content":[{"type":"input_text","text":"framework","prompt_cache_breakpoint":{"mode":"explicit"}}]},{"type":"message","role":"system","content":"code definition"},{"type":"message","role":"user","content":"apply the code"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contextual.Instructions != "gateway rules\n\nframework\n\ncode definition" || contextual.Prompt != "apply the code" {
+		t.Fatalf("context mapping: %+v", contextual)
 	}
 }

@@ -96,6 +96,10 @@ exit 2
 	if err := checkVersion(ctx, binary, good); err != nil {
 		t.Fatal(err)
 	}
+	current := []string{"PATH=/bin", "FAKE_VERSION=codex-cli 0.154.0", "FAKE_LOGIN=Logged in using ChatGPT"}
+	if err := checkVersion(ctx, binary, current); err != nil {
+		t.Fatal(err)
+	}
 	if err := checkLogin(ctx, binary, good); err != nil {
 		t.Fatal(err)
 	}
