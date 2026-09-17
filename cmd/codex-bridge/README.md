@@ -17,13 +17,13 @@ The bridge accepts `POST /responses` and `POST /v1/responses`, buffered or with 
 
 History, non-user messages, images, caller tools and tool results, reasoning summaries, `previous_response_id`, output-token limits, persistence, and every other unsupported non-empty field receive `400`. CLI startup, execution, or JSONL protocol failures receive `502`.
 
-Streaming is wire-compatible SSE, but it is deliberately delayed: the bridge waits for `codex exec` to finish, then emits the completed answer in one `response.output_text.delta`. Buffered and streaming responses are built from the same internal response and report the same text and usage.
+Streaming is wire-compatible SSE. The bridge immediately emits `response.created` and `response.in_progress`, then writes a comment keepalive every 25 seconds while `codex exec` runs. It emits the completed answer in one `response.output_text.delta`. Buffered and streaming responses report the same completed text and usage.
 
 Every request is independent. There are no persistent sessions, injected thread IDs, history, caller tools, MCP servers, or app-server protocol.
 
 ## Run
 
-The bridge supports `codex-cli 0.149.1` and `0.154.0`. Authenticate through ChatGPT, then start it:
+The bridge accepts the installed Codex CLI version. Authenticate through ChatGPT, then start it:
 
 ```console
 $ codex login
@@ -65,10 +65,10 @@ $ curl -s localhost:8083/v1/responses \
 
 ## Isolation
 
-At startup the bridge resolves the executable, requires exactly `codex-cli 0.149.1`, checks for `Logged in using ChatGPT`, creates an empty read-only working directory, and discovers installed `SKILL.md` files so each can be explicitly disabled.
+At startup the bridge resolves the executable, verifies that it identifies itself as `codex-cli`, checks for `Logged in using ChatGPT`, creates an empty read-only working directory, and discovers installed `SKILL.md` files so each can be explicitly disabled.
 
 Each call uses `--ephemeral`, `--strict-config`, `--ignore-user-config`, `--ignore-rules`, a read-only sandbox, approval policy `never`, the OpenAI provider, and `personality="none"`. Tool, app, plugin, MCP, browser, image, shell, plan, user-input, hook, skill, and multi-agent surfaces are disabled. Configurable permission, environment, app, and collaboration instruction sections are omitted. The only request-specific developer instruction and user text are passed to the model. Codex's model-level base prompt remains unavoidable.
 
-The child environment removes all `OPENAI_*` and `CONDUCTOR_*` variables and every `CODEX_*` variable except `CODEX_HOME`. This prevents inherited API credentials or parent-session state from changing authentication or context while retaining access to the stored ChatGPT login.
+The child environment removes all `OPENAI_*`, `CONDUCTOR_*`, and `CODEX_*` variables, including `CODEX_HOME`. Codex therefore uses the normal login and skill locations under the user's `HOME` instead of inheriting an IDE or parent agent's private session.
 
 Cancellation kills and reaps only that request's subprocess. JSON Schema files are request-scoped temporary files and are removed after the process exits.

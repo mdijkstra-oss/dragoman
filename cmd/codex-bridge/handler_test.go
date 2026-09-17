@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
@@ -67,6 +71,76 @@ func TestHandlerReturns400And502(t *testing.T) {
 		response := post(t, handler, `{"model":"gpt-5.4","input":`+strconv.Quote(prompt)+`}`)
 		if response.Code != http.StatusBadGateway {
 			t.Fatalf("%s status = %d: %s", prompt, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestHandlerStreamingStartsBeforeRunnerCompletes(t *testing.T) {
+	runner, records := fakeRunner(t)
+	defer runner.Close()
+	server := httptest.NewServer(NewHandler(runner, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer server.Close()
+
+	context, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	request, err := http.NewRequestWithContext(context, http.MethodPost, server.URL+"/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"delayed","stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("stream did not start before runner completed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("stream status/headers: %d %v", response.StatusCode, response.Header)
+	}
+
+	reader := bufio.NewReader(response.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != "event: response.created\n" {
+		t.Fatalf("first stream event = %q", line)
+	}
+
+	if err := os.WriteFile(records+"/release", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHandlerStreamingKeepsDelayedRunnerAlive(t *testing.T) {
+	runner, _ := fakeRunner(t)
+	defer runner.Close()
+	h := handler{
+		runner:            runner,
+		log:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		heartbeatInterval: time.Millisecond,
+	}
+	server := httptest.NewServer(http.HandlerFunc(h.responses))
+	defer server.Close()
+
+	context, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	request, err := http.NewRequestWithContext(context, http.MethodPost, server.URL, strings.NewReader(`{"model":"gpt-5.4","input":"delayed","stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("stream ended before a keepalive: %v", err)
+		}
+		if line == ": keepalive\n" {
+			return
 		}
 	}
 }

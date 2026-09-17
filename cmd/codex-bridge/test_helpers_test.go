@@ -40,6 +40,10 @@ done
 if [ -n "$schema" ]; then cp "$schema" "$RECORD_DIR/schema.$pid"; fi
 prompt=$(dd bs=65536 2>/dev/null)
 printf '%s' "$prompt" >"$RECORD_DIR/stdin.$pid"
+if [ "$prompt" = "delayed" ]; then
+  : >"$RECORD_DIR/started.$pid"
+  while [ ! -f "$RECORD_DIR/release" ]; do sleep 0.01; done
+fi
 case "$prompt" in
   block)
     printf '%s\n' "$pid" >"$RECORD_DIR/pid.$pid"
@@ -68,7 +72,7 @@ esac
 	t.Setenv("RECORD_DIR", records)
 	t.Setenv("CODEX_HOME", filepath.Join(root, "home", "codex"))
 	t.Setenv("HOME", filepath.Join(root, "home"))
-	skill := filepath.Join(os.Getenv("CODEX_HOME"), "skills", "fake", "SKILL.md")
+	skill := filepath.Join(os.Getenv("HOME"), ".codex", "skills", "fake", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -75,7 +75,7 @@ func TestChildEnvDropsCredentialsAndParentContext(t *testing.T) {
 		"CODEX_HOME=/codex", "CODEX_THREAD_ID=parent", "CODEX_API_KEY=secret",
 		"CONDUCTOR_WORKSPACE_ID=x", "OTHER=value",
 	})
-	want := "PATH=/bin HOME=/home CODEX_HOME=/codex OTHER=value"
+	want := "PATH=/bin HOME=/home OTHER=value"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("environment = %v, want %s", got, want)
 	}
@@ -92,19 +92,19 @@ exit 2
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	good := []string{"PATH=/bin", "FAKE_VERSION=" + supportedVersion, "FAKE_LOGIN=Logged in using ChatGPT"}
+	good := []string{"PATH=/bin", "FAKE_VERSION=codex-cli 0.149.1", "FAKE_LOGIN=Logged in using ChatGPT"}
 	if err := checkVersion(ctx, binary, good); err != nil {
 		t.Fatal(err)
 	}
-	current := []string{"PATH=/bin", "FAKE_VERSION=codex-cli 0.154.0", "FAKE_LOGIN=Logged in using ChatGPT"}
+	current := []string{"PATH=/bin", "FAKE_VERSION=codex-cli 99.0.1", "FAKE_LOGIN=Logged in using ChatGPT"}
 	if err := checkVersion(ctx, binary, current); err != nil {
 		t.Fatal(err)
 	}
 	if err := checkLogin(ctx, binary, good); err != nil {
 		t.Fatal(err)
 	}
-	badVersion := []string{"PATH=/bin", "FAKE_VERSION=codex-cli 0.150.0"}
-	if err := checkVersion(ctx, binary, badVersion); err == nil || !strings.Contains(err.Error(), supportedVersion) {
+	badVersion := []string{"PATH=/bin", "FAKE_VERSION=not-codex 1.0.0"}
+	if err := checkVersion(ctx, binary, badVersion); err == nil || !strings.Contains(err.Error(), "Codex CLI") {
 		t.Fatalf("wrong-version error = %v", err)
 	}
 	badLogin := []string{"PATH=/bin", "FAKE_LOGIN=Logged in using an API key"}

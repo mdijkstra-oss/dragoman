@@ -21,13 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const supportedVersion = "codex-cli 0.149.1"
 const killedChildPipeGrace = 5 * time.Second
-
-var supportedVersions = map[string]bool{
-	"codex-cli 0.149.1": true,
-	"codex-cli 0.154.0": true,
-}
 
 var disabledFeatures = []string{
 	"apps", "artifact", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
@@ -64,7 +58,7 @@ type skillConfig struct {
 func NewRunner(ctx context.Context, binary string, log *slog.Logger) (*Runner, error) {
 	path, err := exec.LookPath(binary)
 	if err != nil {
-		return nil, fmt.Errorf("%q not found on PATH; install Codex CLI %s or pass --binary", binary, supportedVersion)
+		return nil, fmt.Errorf("%q not found on PATH; install Codex CLI or pass --binary", binary)
 	}
 	env := childEnv(os.Environ())
 	if err := checkVersion(ctx, path, env); err != nil {
@@ -81,7 +75,7 @@ func NewRunner(ctx context.Context, binary string, log *slog.Logger) (*Runner, e
 		_ = os.RemoveAll(workDir)
 		return nil, err
 	}
-	skills, err := discoverSkills(os.Getenv("CODEX_HOME"), os.Getenv("HOME"))
+	skills, err := discoverSkills("", os.Getenv("HOME"))
 	if err != nil {
 		_ = os.Chmod(workDir, 0o755)
 		_ = os.RemoveAll(workDir)
@@ -106,11 +100,10 @@ func checkVersion(ctx context.Context, path string, env []string) error {
 		return fmt.Errorf("checking %s version: %w", path, err)
 	}
 	got := strings.TrimSpace(string(output))
-	if !supportedVersions[got] {
+	if !strings.HasPrefix(got, "codex-cli ") || len(strings.TrimPrefix(got, "codex-cli ")) == 0 {
 		return fmt.Errorf(
-			"unsupported Codex CLI version %q; codex-bridge requires a supported version (%s or codex-cli 0.154.0)",
+			"unsupported Codex CLI version %q; codex-bridge requires a Codex CLI executable",
 			got,
-			supportedVersion,
 		)
 	}
 	return nil
@@ -130,7 +123,7 @@ func childEnv(environ []string) []string {
 	kept := make([]string, 0, len(environ))
 	for _, entry := range environ {
 		name, _, _ := strings.Cut(entry, "=")
-		if strings.HasPrefix(name, "OPENAI_") || strings.HasPrefix(name, "CONDUCTOR_") || (strings.HasPrefix(name, "CODEX_") && name != "CODEX_HOME") {
+		if strings.HasPrefix(name, "OPENAI_") || strings.HasPrefix(name, "CONDUCTOR_") || strings.HasPrefix(name, "CODEX_") {
 			continue
 		}
 		kept = append(kept, entry)

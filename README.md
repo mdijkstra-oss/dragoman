@@ -168,7 +168,7 @@ The service table is embedded, so editing it is a source change and rebuilds the
 
 `make bridge` starts [claude-bridge](cmd/claude-bridge/README.md), a development-only server that answers `anthropic-messages` requests through a signed-in Claude Code CLI instead of an API key. No tools, one turn per request; its README lists the limits.
 
-`make codex-bridge` starts [codex-bridge](cmd/codex-bridge/README.md), a development-only Responses server that runs one isolated, tool-disabled Codex CLI turn against the signed-in ChatGPT account. It buffers each CLI result; `stream: true` receives valid but delayed SSE with one text delta.
+`make codex-bridge` starts [codex-bridge](cmd/codex-bridge/README.md), a development-only Responses server that runs one isolated, tool-disabled Codex CLI turn against the signed-in ChatGPT account. It buffers each CLI result; `stream: true` immediately acknowledges the request and sends keepalives until its completed answer arrives as one text delta.
 
 ## CLI
 

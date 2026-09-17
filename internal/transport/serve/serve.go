@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mdijkstra-oss/dragoman/internal/base"
@@ -44,6 +45,8 @@ type Service struct {
 // real status is passed through instead, so a rate limit keeps the retry
 // semantics an SDK already implements.
 const StatusBackendRefused = http.StatusBadGateway
+
+const streamKeepaliveInterval = 25 * time.Second
 
 func New(cfg Config) http.Handler {
 	listener := server{
@@ -149,9 +152,31 @@ func (s server) translated(w http.ResponseWriter, r *http.Request, opts core.Opt
 
 func (s server) streamed(w http.ResponseWriter, r *http.Request, opts core.Options, body []byte) {
 	events := newStream(w)
+	stopKeepalives := make(chan struct{})
+	var keepalives sync.WaitGroup
+	keepalives.Add(1)
+	go func() {
+		defer keepalives.Done()
+		ticker := time.NewTicker(streamKeepaliveInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-stopKeepalives:
+				return
+			case <-ticker.C:
+				if err := events.KeepAlive(); err != nil {
+					return
+				}
+			}
+		}
+	}()
 	started := time.Now()
 	result, err := core.Run(r.Context(), s.catalog, opts, body, s.executor, events.Send)
 	elapsed := time.Since(started)
+	close(stopKeepalives)
+	keepalives.Wait()
 	s.record(opts.Preset, result.Drops)
 	if err == nil {
 		s.served(r, opts, http.StatusOK, elapsed, result.Usage)

@@ -2,7 +2,9 @@ package serve
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"sync"
 
 	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
@@ -12,6 +14,7 @@ import (
 type stream struct {
 	writer  http.ResponseWriter
 	control *http.ResponseController
+	mu      sync.Mutex
 
 	started  bool
 	last     base.EventType
@@ -24,6 +27,12 @@ func newStream(w http.ResponseWriter) *stream {
 }
 
 func (s *stream) Send(event base.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.send(event)
+}
+
+func (s *stream) send(event base.Event) error {
 	// The payload is compact JSON, so every newline inside it is escaped and an
 	// event is always exactly one data line.
 	encoded, err := base.EncodeEvent(event)
@@ -38,9 +47,27 @@ func (s *stream) Send(event base.Event) error {
 	return s.flush()
 }
 
-func (s *stream) Started() bool { return s.started }
+func (s *stream) Started() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.started
+}
+
+func (s *stream) KeepAlive() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started {
+		return nil
+	}
+	if _, err := io.WriteString(s.writer, ": keepalive\n\n"); err != nil {
+		return err
+	}
+	return s.flush()
+}
 
 func (s *stream) Fail(cause base.ResponseError) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.started || s.last == base.EventFailed {
 		return nil
 	}
@@ -50,7 +77,7 @@ func (s *stream) Fail(cause base.ResponseError) error {
 	}
 	snapshot.Status = base.StatusFailed
 	snapshot.Error = &cause
-	return s.Send(base.Event{
+	return s.send(base.Event{
 		Type:           base.EventFailed,
 		SequenceNumber: s.sequence + 1,
 		Response:       &snapshot,

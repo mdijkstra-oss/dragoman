@@ -75,6 +75,19 @@ func TestFailContinuesTheSequence(t *testing.T) {
 	}
 }
 
+func TestKeepAliveWritesACommentToStartedStream(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	events := newStream(recorder)
+	send(t, events, base.EventCreated, 1)
+
+	if err := events.KeepAlive(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(recorder.Body.String(), ": keepalive\n\n") {
+		t.Fatalf("stream does not end with a keepalive: %q", recorder.Body.String())
+	}
+}
+
 func send(t *testing.T, events *stream, eventType base.EventType, sequence int) {
 	t.Helper()
 	event := base.Event{Type: eventType, SequenceNumber: sequence}

@@ -13,13 +13,16 @@ import (
 	"github.com/mdijkstra-oss/dragoman/internal/base"
 )
 
+const streamHeartbeatInterval = 25 * time.Second
+
 type handler struct {
-	runner *Runner
-	log    *slog.Logger
+	runner            *Runner
+	log               *slog.Logger
+	heartbeatInterval time.Duration
 }
 
 func NewHandler(runner *Runner, log *slog.Logger) http.Handler {
-	h := handler{runner: runner, log: log}
+	h := handler{runner: runner, log: log, heartbeatInterval: streamHeartbeatInterval}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /responses", h.responses)
 	mux.HandleFunc("POST /v1/responses", h.responses)
@@ -44,6 +47,10 @@ func (h handler) responses(w http.ResponseWriter, request *http.Request) {
 	}
 
 	h.log.Info("call", "model", call.Model, "schema", len(call.Schema) > 0, "effort", call.Effort, "stream", stream)
+	if stream {
+		h.stream(w, request, call)
+		return
+	}
 	result, err := h.runner.Run(request.Context(), call)
 	if err != nil {
 		h.log.Error("bridge failed", "error", err.Error())
@@ -53,39 +60,107 @@ func (h handler) responses(w http.ResponseWriter, request *http.Request) {
 	for _, diagnostic := range result.Diagnostics {
 		h.log.Warn("codex diagnostic", "message", diagnostic)
 	}
-	response, events := canonicalResponse(call.Model, result)
-	if !stream {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			h.log.Error("writing response", "error", err.Error())
-		}
-		return
+	response, _ := canonicalResponse(call.Model, result)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.log.Error("writing response", "error", err.Error())
 	}
+}
 
+func (h handler) stream(w http.ResponseWriter, request *http.Request, call Invocation) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+
+	emitter := responseEmitter(call.Model)
+	var started []base.Event
+	emitter, started = base.Begin(emitter)
+	if err := writeEvents(w, started); err != nil {
+		return
+	}
+
+	type completedRun struct {
+		result Result
+		err    error
+	}
+	completed := make(chan completedRun, 1)
+	go func() {
+		result, err := h.runner.Run(request.Context(), call)
+		completed <- completedRun{result: result, err: err}
+	}()
+
+	heartbeats := time.NewTicker(h.heartbeatInterval)
+	defer heartbeats.Stop()
+	var run completedRun
+
+awaitRun:
+	for {
+		select {
+		case run = <-completed:
+			break awaitRun
+		case <-heartbeats.C:
+			if err := writeKeepalive(w); err != nil {
+				return
+			}
+		}
+	}
+
+	if run.err != nil {
+		h.log.Error("bridge failed", "error", run.err.Error())
+		emitter = base.SetOutcome(emitter, base.StatusFailed, nil, &base.ResponseError{
+			Type:    "api_error",
+			Message: run.err.Error(),
+		})
+		_, events := base.Finish(emitter)
+		_ = writeEvents(w, events)
+		return
+	}
+	for _, diagnostic := range run.result.Diagnostics {
+		h.log.Warn("codex diagnostic", "message", diagnostic)
+	}
+	_, events := canonicalResponseFromEmitter(emitter, run.result)
+	_ = writeEvents(w, events)
+}
+
+func writeKeepalive(w http.ResponseWriter) error {
+	if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+		return err
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return nil
+}
+
+func writeEvents(w http.ResponseWriter, events []base.Event) error {
 	for _, event := range events {
 		encoded, err := base.EncodeEvent(event)
 		if err != nil {
-			h.log.Error("encoding event", "error", err.Error())
-			return
+			return err
 		}
 		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, encoded); err != nil {
-			return
+			return err
 		}
 	}
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
+	return nil
 }
 
 func canonicalResponse(model string, result Result) (base.Response, []base.Event) {
-	emitter := base.Emitter{
+	return canonicalResponseFromEmitter(responseEmitter(model), result)
+}
+
+func responseEmitter(model string) base.Emitter {
+	return base.Emitter{
 		ResponseID: mintResponseID(),
 		Model:      model,
 		CreatedAt:  time.Now().Unix(),
 	}
+}
+
+func canonicalResponseFromEmitter(emitter base.Emitter, result Result) (base.Response, []base.Event) {
 	emitter, events := base.TextDelta(emitter, "answer", result.Answer)
 	var closed []base.Event
 	emitter, closed = base.Close(emitter, "answer")
